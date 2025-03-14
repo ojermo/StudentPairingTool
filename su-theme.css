@@ -1,0 +1,306 @@
+/* Seattle University Theme - Student Pairing Tool */
+
+/* Color variables */
+* {
+    --su-primary: #da532c;
+    --su-primary-dark: #bc4626;
+    --su-primary-light: #e57a59;
+    --su-background: #f5f5f5;
+    --su-white: #ffffff;
+    --su-black: #333333;
+    --su-gray: #666666;
+    --su-light-gray: #cccccc;
+    --su-border: #dadada;
+    --su-absent: #cc0000;
+}
+
+/* QWidget base styling */
+QWidget {
+    font-family: "Segoe UI", "Arial", sans-serif;
+    font-size: 10pt;
+    color: var(--su-black);
+}
+
+/* Main window */
+QMainWindow {
+    background-color: var(--su-white);
+}
+
+/* Menu bar */
+QMenuBar {
+    background-color: var(--su-primary);
+    color: var(--su-white);
+    padding: 5px;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 5px 10px;
+    border-radius: 3px;
+}
+
+QMenuBar::item:selected {
+    background-color: var(--su-primary-dark);
+}
+
+/* Menu */
+QMenu {
+    background-color: var(--su-white);
+    border: 1px solid var(--su-border);
+}
+
+QMenu::item {
+    padding: 5px 25px 5px 20px;
+}
+
+QMenu::item:selected {
+    background-color: var(--su-primary);
+    color: var(--su-white);
+}
+
+/* Buttons */
+QPushButton {
+    padding: 8px 15px;
+    border-radius: 4px;
+    background-color: var(--su-primary);
+    color: white;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: var(--su-primary-dark);
+}
+
+QPushButton:pressed {
+    background-color: var(--su-primary-dark);
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
+
+QPushButton:disabled {
+    background-color: var(--su-light-gray);
+    color: var(--su-gray);
+}
+
+/* Secondary/outline buttons */
+QPushButton.secondary {
+    background-color: transparent;
+    border: 1px solid var(--su-primary);
+    color: var(--su-primary);
+}
+
+QPushButton.secondary:hover {
+    background-color: rgba(218, 83, 44, 0.1);
+}
+
+QPushButton.secondary:pressed {
+    background-color: rgba(218, 83, 44, 0.2);
+}
+
+/* Tertiary buttons */
+QPushButton.tertiary {
+    background-color: var(--su-background);
+    border: 1px solid var(--su-gray);
+    color: var(--su-black);
+}
+
+QPushButton.tertiary:hover {
+    background-color: #e9e9e9;
+}
+
+/* Header/Title bars */
+QWidget#titleBar {
+    background-color: var(--su-primary);
+    color: var(--su-white);
+    padding: 10px;
+    font-size: 14pt;
+    font-weight: bold;
+}
+
+/* Tab Widget */
+QTabWidget::pane {
+    border: 1px solid var(--su-border);
+    border-radius: 5px;
+    background-color: var(--su-white);
+}
+
+QTabBar::tab {
+    background-color: var(--su-background);
+    color: var(--su-gray);
+    padding: 10px 15px;
+    margin-right: 2px;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+
+QTabBar::tab:selected {
+    background-color: var(--su-white);
+    color: var(--su-primary);
+    border: 1px solid var(--su-primary);
+    border-bottom: none;
+    font-weight: bold;
+}
+
+QTabBar::tab:hover:!selected {
+    background-color: #e9e9e9;
+}
+
+/* Line edits */
+QLineEdit, QTextEdit, QComboBox {
+    padding: 8px;
+    border: 1px solid var(--su-light-gray);
+    border-radius: 3px;
+    background-color: var(--su-white);
+}
+
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus {
+    border: 1px solid var(--su-primary);
+}
+
+/* Combo box */
+QComboBox {
+    padding-right: 20px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    width: 20px;
+    border-left: none;
+}
+
+QComboBox::down-arrow {
+    image: url(resources/icons/dropdown.png);
+    width: 12px;
+    height: 12px;
+}
+
+/* Check boxes */
+QCheckBox {
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--su-light-gray);
+    border-radius: 2px;
+}
+
+QCheckBox::indicator:checked {
+    background-color: var(--su-primary);
+    border: 1px solid var(--su-primary);
+    image: url(resources/icons/check.png);
+}
+
+/* Radio buttons */
+QRadioButton {
+    spacing: 8px;
+}
+
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--su-light-gray);
+    border-radius: 7px;
+}
+
+QRadioButton::indicator:checked {
+    border: 1px solid var(--su-primary);
+    background-color: var(--su-white);
+    image: url(resources/icons/radio.png);
+}
+
+/* Tables */
+QTableView {
+    border: 1px solid var(--su-border);
+    background-color: var(--su-white);
+    alternate-background-color: var(--su-background);
+    gridline-color: var(--su-border);
+}
+
+QTableView::item {
+    padding: 5px;
+}
+
+QTableView::item:selected {
+    background-color: var(--su-primary);
+    color: var(--su-white);
+}
+
+QHeaderView::section {
+    background-color: var(--su-background);
+    padding: 8px;
+    border: 1px solid var(--su-border);
+    font-weight: bold;
+}
+
+/* Group boxes */
+QGroupBox {
+    border: 1px solid var(--su-border);
+    border-radius: 5px;
+    margin-top: 15px;
+    padding-top: 15px;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 5px;
+    background-color: var(--su-white);
+    font-weight: bold;
+}
+
+/* Scroll bars */
+QScrollBar:vertical {
+    border: none;
+    background: var(--su-background);
+    width: 8px;
+    margin: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: var(--su-light-gray);
+    min-height: 20px;
+    border-radius: 4px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    border: none;
+    background: none;
+    height: 0px;
+}
+
+/* Custom classes for our app */
+.card {
+    background-color: var(--su-white);
+    border: 1px solid var(--su-border);
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.dashboard-item {
+    background-color: #f9f9f9;
+    border: 1px solid var(--su-border);
+    border-radius: 3px;
+    padding: 10px;
+}
+
+.pair-card {
+    background-color: var(--su-white);
+    border: 1px solid var(--su-border);
+    border-radius: 5px;
+    padding: 10px;
+    margin: 5px;
+}
+
+.absent-indicator {
+    color: var(--su-absent);
+    font-weight: bold;
+}
+
+/* Status bar */
+QStatusBar {
+    background-color: var(--su-background);
+    color: var(--su-gray);
+}

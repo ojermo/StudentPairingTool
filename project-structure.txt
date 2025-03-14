@@ -1,0 +1,33 @@
+student_pairing_tool/
+│
+├── app.py                  # Main application entry point
+├── models/                 # Data models
+│   ├── __init__.py
+│   ├── class_model.py      # Class/course data structure
+│   ├── student_model.py    # Student data structure 
+│   └── pairing_model.py    # Pairing history and algorithm
+│
+├── views/                  # UI components
+│   ├── __init__.py
+│   ├── main_window.py      # Main application window
+│   ├── dashboard.py        # Class dashboard view
+│   ├── class_creation.py   # New class form
+│   ├── student_roster.py   # Student management view
+│   ├── pairing_screen.py   # Pairing generation view
+│   ├── history_view.py     # Pairing history view
+│   └── presentation_view.py # Presentation mode
+│
+├── controllers/            # Business logic
+│   ├── __init__.py
+│   ├── class_controller.py # Class management
+│   ├── student_controller.py # Student management
+│   └── pairing_controller.py # Pairing generation logic
+│
+├── utils/                  # Utility functions
+│   ├── __init__.py
+│   ├── file_handlers.py    # JSON I/O operations
+│   └── export.py           # Export functionality
+│
+└── resources/              # Application resources
+    ├── styles.qss          # Qt Style Sheets for UI styling
+    └── icons/              # Application icons
