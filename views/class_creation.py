@@ -147,6 +147,7 @@ class ClassCreationView(QWidget):
         tracks_container = QWidget()
         tracks_layout = QVBoxLayout(tracks_container)
         tracks_layout.setContentsMargins(0, 0, 0, 0)
+        tracks_container.setMinimumHeight(150)  # Set fixed minimum height
         
         self.track_checkboxes = {}
         
@@ -183,14 +184,15 @@ class ClassCreationView(QWidget):
         form_layout.addWidget(roster_label)
         
         # Import options
-        self.import_radio = QRadioButton("Import student list from Excel/CSV")
-        self.import_radio.setChecked(True)
-        self.import_radio.toggled.connect(self.toggle_import_method)
-        
         self.manual_radio = QRadioButton("Add students after creating class")
-        
-        form_layout.addWidget(self.import_radio)
-        form_layout.addWidget(self.manual_radio)
+        self.manual_radio.setChecked(True)  # Make this the default option
+
+        self.import_radio = QRadioButton("Import student list from Excel/CSV")
+        self.import_radio.setChecked(False)
+        # Don't connect the signal yet - we'll do that after defining import_container
+
+        form_layout.addWidget(self.manual_radio)  # Add this first
+        form_layout.addWidget(self.import_radio)  # Add this second
         
         # Import file selector (shown when import is selected)
         self.import_container = QWidget()
@@ -200,13 +202,21 @@ class ClassCreationView(QWidget):
         self.file_path_label = QLabel("No file selected")
         self.file_path_label.setStyleSheet("color: #666666;")
         
-        browse_button = QPushButton("Browse...")
+        browse_button = QPushButton("Select File...")
+        browse_button.setStyleSheet("background-color: #da532c; color: white; font-weight: bold; padding: 5px 10px;")
+        browse_button.setMinimumWidth(100)  # Set a minimum width to ensure text is visible
         browse_button.clicked.connect(self.browse_file)
         
         import_layout.addWidget(self.file_path_label)
         import_layout.addWidget(browse_button)
         
         form_layout.addWidget(self.import_container)
+        
+        # Now that import_container exists, we can connect the signal
+        self.import_radio.toggled.connect(self.toggle_import_method)
+        
+        # Initialize visibility based on current selection
+        self.import_container.setVisible(self.import_radio.isChecked())
         
         # Preview of imported students
         self.preview_container = QWidget()
@@ -257,7 +267,8 @@ class ClassCreationView(QWidget):
         self.custom_tracks = []
         
         # Reset import options
-        self.import_radio.setChecked(True)
+        self.manual_radio.setChecked(True)
+        self.import_radio.setChecked(False)
         self.file_path_label.setText("No file selected")
         self.preview_container.setVisible(False)
         self.imported_students = []
