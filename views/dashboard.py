@@ -39,16 +39,19 @@ class ClassCard(QFrame):
         
         open_button = QPushButton("Open")
         open_button.setFixedSize(80, 30)
+        open_button.setStyleSheet("background-color: #da532c; color: white; font-weight: bold; border: none; border-radius: 4px;")
         open_button.clicked.connect(self.open_class)
-        
+
         export_button = QPushButton("Export")
         export_button.setFixedSize(80, 30)
-        export_button.setObjectName("secondary")  # For styling
+        export_button.setObjectName("secondary")
+        export_button.setStyleSheet("background-color: white; border: 1px solid #da532c; color: #da532c; border-radius: 4px;")
         export_button.clicked.connect(self.export_class)
-        
+
         delete_button = QPushButton("Delete")
         delete_button.setFixedSize(80, 30) 
-        delete_button.setObjectName("tertiary")  # For styling
+        delete_button.setObjectName("tertiary")
+        delete_button.setStyleSheet("background-color: #f5f5f5; border: 1px solid #666666; color: #333333; border-radius: 4px;")
         delete_button.clicked.connect(self.delete_class)
 
         buttons_layout.addWidget(open_button)
@@ -140,6 +143,7 @@ class DashboardView(QWidget):
         
         create_button = QPushButton("+ Create New Class")
         create_button.setObjectName("createNewClassButton")
+        create_button.setStyleSheet("background-color: #da532c; color: white; font-weight: bold; border: none; padding: 8px 15px; border-radius: 4px;")
         create_button.clicked.connect(self.create_new_class)
         header_layout.addWidget(create_button, alignment=Qt.AlignRight)
         
@@ -165,6 +169,7 @@ class DashboardView(QWidget):
         
         import_button = QPushButton("Import Class")
         import_button.setObjectName("secondary")
+        import_button.setStyleSheet("background-color: white; border: 1px solid #da532c; color: #da532c; padding: 8px 15px; border-radius: 4px;")
         import_button.clicked.connect(self.import_class)
         bottom_layout.addWidget(import_button)
         

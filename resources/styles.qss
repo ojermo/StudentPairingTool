@@ -1,4 +1,129 @@
-QPushButton { 
-    background-color: blue; 
-    color: white; 
+/* Basic styles */
+QWidget {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 10pt;
+    color: #333333;
+}
+
+/* Main window */
+QMainWindow {
+    background-color: #f5f5f5;
+}
+
+/* Title bar */
+QWidget#titleBar {
+    background-color: #da532c;
+    color: white;
+    padding: 10px;
+}
+
+/* All buttons */
+QPushButton {
+    background-color: #da532c;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #bc4626;
+}
+
+/* Secondary buttons */
+QPushButton[objectName="secondary"] {
+    background-color: white;
+    border: 1px solid #da532c;
+    color: #da532c;
+}
+
+QPushButton[objectName="secondary"]:hover {
+    background-color: #f9f9f9;
+}
+
+/* Tertiary buttons */
+QPushButton[objectName="tertiary"] {
+    background-color: #f5f5f5;
+    border: 1px solid #666666;
+    color: #333333;
+}
+
+/* Create New Class Button */
+QPushButton#createNewClassButton {
+    background-color: #da532c;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+QPushButton#createNewClassButton:hover {
+    background-color: #bc4626;
+}
+
+/* Navigation buttons/tabs */
+QPushButton#dashboard_tab, QPushButton#students_tab, 
+QPushButton#pairings_tab, QPushButton#history_tab, 
+QPushButton#export_tab {
+    background-color: #f5f5f5;
+    color: #666666;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 0;
+    padding: 8px 15px;
+}
+
+/* Active tab styling */
+QPushButton#dashboard_tab:checked, QPushButton#students_tab:checked,
+QPushButton#pairings_tab:checked, QPushButton#history_tab:checked,
+QPushButton#export_tab:checked,
+QPushButton[styleSheet*="font-weight: bold"] {
+    color: #da532c;
+    font-weight: bold;
+    border-bottom: 3px solid #da532c;
+}
+
+/* Class cards */
+QFrame#classCard {
+    background-color: white;
+    border: 1px solid #dadada;
+    border-radius: 4px;
+    margin: 5px;
+    padding: 10px;
+}
+
+/* Content frames */
+QFrame#contentFrame, QFrame#classesFrame, QFrame#formFrame {
+    background-color: white;
+    border: 1px solid #dadada;
+    border-radius: 5px;
+    padding: 5px;
+}
+
+/* Tables */
+QTableView {
+    border: 1px solid #dadada;
+    background-color: white;
+    gridline-color: #dadada;
+}
+
+QTableView::item {
+    padding: 5px;
+}
+
+QHeaderView::section {
+    background-color: #f5f5f5;
+    padding: 5px;
+    border: 1px solid #dadada;
+    font-weight: bold;
+}
+
+/* Form elements */
+QLineEdit, QTextEdit, QComboBox {
+    padding: 8px;
+    border: 1px solid #cccccc;
+    border-radius: 3px;
+    background-color: white;
 }
