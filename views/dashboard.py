@@ -7,6 +7,48 @@ from PySide6.QtGui import QFont
 
 from datetime import datetime
 
+def format_class_display_name(class_data):
+    """
+    Format class name with quarter abbreviation and year.
+    Example: "Mental Health Lab" with quarter "Spring 2025" becomes "Mental Health Lab - SPR25"
+    """
+    name = class_data.get("name", "")
+    quarter = class_data.get("quarter", "")
+    
+    # If quarter is empty, just return the name
+    if not quarter:
+        return name
+    
+    # Split quarter into season and year
+    parts = quarter.split()
+    if len(parts) < 2:
+        return name
+    
+    season, year = parts[0], parts[1]
+    
+    # Convert season to abbreviation
+    season_abbr = ""
+    if season.lower() == "spring":
+        season_abbr = "SPR"
+    elif season.lower() == "summer":
+        season_abbr = "SUM"
+    elif season.lower() == "fall":
+        season_abbr = "FAL"
+    elif season.lower() == "winter":
+        season_abbr = "WIN"
+    else:
+        season_abbr = season[:3].upper()
+    
+    # Get last two digits of year
+    year_abbr = year[-2:] if len(year) >= 2 else year
+    
+    # Check if the name already ends with the formatted quarter
+    formatted_quarter = f"{season_abbr}{year_abbr}"
+    if name.endswith(formatted_quarter):
+        return name
+    
+    # Add the formatted quarter to the name
+    return f"{name} - {formatted_quarter}"
 
 class ClassCard(QFrame):
     """Widget representing a class card on the dashboard."""
@@ -30,6 +72,7 @@ class ClassCard(QFrame):
         top_row = QHBoxLayout()
         
         # Class name
+        display_name = format_class_display_name(self.class_data)
         class_name = QLabel(self.class_data["name"])
         class_name.setStyleSheet("font-size: 16px; font-weight: bold;")
         top_row.addWidget(class_name)
@@ -38,18 +81,15 @@ class ClassCard(QFrame):
         buttons_layout = QHBoxLayout()
         
         open_button = QPushButton("Open")
-        open_button.setFixedSize(80, 30)
         open_button.setStyleSheet("background-color: #da532c; color: white; font-weight: bold; border: none; border-radius: 4px;")
         open_button.clicked.connect(self.open_class)
 
         export_button = QPushButton("Export")
-        export_button.setFixedSize(80, 30)
         export_button.setObjectName("secondary")
         export_button.setStyleSheet("background-color: white; border: 1px solid #da532c; color: #da532c; border-radius: 4px;")
         export_button.clicked.connect(self.export_class)
 
         delete_button = QPushButton("Delete")
-        delete_button.setFixedSize(80, 30) 
         delete_button.setObjectName("tertiary")
         delete_button.setStyleSheet("background-color: #f5f5f5; border: 1px solid #666666; color: #333333; border-radius: 4px;")
         delete_button.clicked.connect(self.delete_class)
