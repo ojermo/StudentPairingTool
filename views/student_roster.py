@@ -1,10 +1,12 @@
+# views/student_roster.py
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QFrame,
     QHeaderView, QCheckBox, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt
+from utils.ui_helpers import setup_navigation_bar
 
 class StudentRosterView(QWidget):
     """View for managing the student roster and attendance."""
@@ -23,29 +25,7 @@ class StudentRosterView(QWidget):
         main_layout.setContentsMargins(10, 10, 10, 10)
         
         # Navigation tabs
-        tabs_layout = QHBoxLayout()
-        
-        self.students_tab = QPushButton("Students")
-        self.students_tab.setStyleSheet("font-weight: bold; color: #da532c;")
-        
-        self.pairings_tab = QPushButton("Pairings")
-        self.pairings_tab.clicked.connect(self.switch_to_pairings)
-        
-        self.history_tab = QPushButton("History")
-        self.history_tab.clicked.connect(self.switch_to_history)
-        
-        self.export_tab = QPushButton("Export")
-
-        self.dashboard_tab = QPushButton("Dashboard")
-        self.dashboard_tab.clicked.connect(self.main_window.show_dashboard)
-
-        tabs_layout.addWidget(self.dashboard_tab)        
-        tabs_layout.addWidget(self.students_tab)
-        tabs_layout.addWidget(self.pairings_tab)
-        tabs_layout.addWidget(self.history_tab)
-        tabs_layout.addWidget(self.export_tab)
-        tabs_layout.addStretch()
-        
+        tabs_layout = setup_navigation_bar(self, current_tab="students")
         main_layout.addLayout(tabs_layout)
         
         # Content frame
@@ -78,6 +58,7 @@ class StudentRosterView(QWidget):
         self.student_table.setHorizontalHeaderLabels(["Name", "Track", "Times in Group of 3", "Present", "Actions"])
         self.student_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.student_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.student_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         
         content_layout.addWidget(self.student_table)
         
@@ -188,14 +169,25 @@ class StudentRosterView(QWidget):
     def proceed_to_pairing(self):
         """Proceed to the pairing screen."""
         # This would save attendance and move to pairing screen
-        self.main_window.show_pairing_screen(self.class_data)
-    
-    def switch_to_pairings(self):
-        """Switch to the pairings tab."""
         if self.class_data:
             self.main_window.show_pairing_screen(self.class_data)
-    
-    def switch_to_history(self):
-        """Switch to the history tab."""
+        
+    def go_to_students(self):
+        """Navigate to the students view."""
+        if self.class_data:
+            self.main_window.show_student_roster(self.class_data)
+
+    def go_to_pairings(self):
+        """Navigate to the pairings view."""
+        if self.class_data:
+            self.main_window.show_pairing_screen(self.class_data)
+
+    def go_to_history(self):
+        """Navigate to the history view."""
         if self.class_data:
             self.main_window.show_history_view(self.class_data)
+
+    def go_to_export(self):
+        """Navigate to the export view."""
+        if self.class_data:
+            self.main_window.show_export_view(self.class_data)

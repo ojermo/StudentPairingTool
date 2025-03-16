@@ -6,10 +6,6 @@ Main application entry point
 
 import sys
 import os
-print("Current working directory:", os.getcwd())
-styles_path = os.path.join(os.getcwd(), "resources", "styles.qss")
-print("Looking for styles at:", styles_path)
-print("File exists:", os.path.exists(styles_path))
 from pathlib import Path
 import argparse
 

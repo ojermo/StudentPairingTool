@@ -17,6 +17,7 @@ from views.class_creation import ClassCreationView
 from views.student_roster import StudentRosterView
 from views.pairing_screen import PairingScreen
 from views.history_view import HistoryView
+from views.export_view import ExportView
 from views.presentation_view import PresentationView
 
 # Import utilities
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         self.student_roster = StudentRosterView(self)
         self.pairing_screen = PairingScreen(self)
         self.history_view = HistoryView(self)
+        self.export_view = ExportView(self)
         self.presentation_view = PresentationView(self)
         
         # Add views to stack
@@ -90,6 +92,7 @@ class MainWindow(QMainWindow):
         self.content_area.addWidget(self.student_roster)
         self.content_area.addWidget(self.pairing_screen)
         self.content_area.addWidget(self.history_view)
+        self.content_area.addWidget(self.export_view)
         self.content_area.addWidget(self.presentation_view)
         
         # Status bar
@@ -99,22 +102,22 @@ class MainWindow(QMainWindow):
     
     def load_styles(self):
     """Load application styles from QSS file."""
-    import os
-    style_file = os.path.join(os.getcwd(), "resources", "styles.qss")
+    style_file = Path(__file__).parent.parent / "resources" / "styles.qss"
     
-    if os.path.exists(style_file):
+    if style_file.exists():
         try:
             with open(style_file, "r", encoding="utf-8") as f:
-                stylesheet_content = f.read()
-                print(f"Stylesheet content length: {len(stylesheet_content)}")
-                print(f"Stylesheet content preview: {stylesheet_content[:100]}...")
-                self.setStyleSheet(stylesheet_content)
-                print("Stylesheet set")
+                # Read the stylesheet
+                stylesheet = f.read()
+                
+                # Apply it to the application instance instead of just this window
+                QApplication.instance().setStyleSheet(stylesheet)
+                print("Stylesheet applied to application")
         except Exception as e:
             print(f"Error reading stylesheet: {str(e)}")
     else:
-        print(f"Style file not found at {style_file}")
-    
+        print(f"Warning: Style file not found at {style_file}")
+        
     def show_dashboard(self):
         """Show the dashboard view."""
         self.title_label.setText("Student Pairing Tool - Seattle University College of Nursing")
@@ -159,6 +162,17 @@ class MainWindow(QMainWindow):
         self.title_label.setText(f"Student Pairing Tool - {class_data['name']}")
         self.history_view.load_class(class_data)
         self.content_area.setCurrentWidget(self.history_view)
+    
+    def show_export_view(self, class_data):
+        """
+        Show the export view for a specific class.
+    
+        Args:
+            class_data: Dictionary containing class information
+        """
+        self.title_label.setText(f"Student Pairing Tool - {class_data['name']}")
+        self.export_view.load_class(class_data)
+        self.content_area.setCurrentWidget(self.export_view)
     
     def show_presentation_view(self, class_data, session_data):
         """
