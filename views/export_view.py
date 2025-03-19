@@ -30,7 +30,6 @@ class ExportView(QWidget):
         # Content frame
         content_frame = QFrame()
         content_frame.setObjectName("contentFrame")
-        content_frame.setStyleSheet("background-color: white; border: 1px solid #dadada; border-radius: 5px;")
         content_layout = QVBoxLayout(content_frame)
         
         # Export header
@@ -40,11 +39,12 @@ class ExportView(QWidget):
         
         # Export options
         options_frame = QFrame()
-        options_frame.setStyleSheet("background-color: #f9f9f9; border: 1px solid #dadada; border-radius: 5px; padding: 10px;")
+        options_frame.setObjectName("optionsFrame")
         options_layout = QVBoxLayout(options_frame)
         
         # Export full class data
         full_export_layout = QHBoxLayout()
+        
         full_export_label = QLabel("Full Class Data (JSON):")
         full_export_label.setStyleSheet("font-weight: bold;")
         full_export_layout.addWidget(full_export_label)
@@ -55,6 +55,7 @@ class ExportView(QWidget):
         full_export_layout.addStretch()
         
         full_export_button = QPushButton("Export")
+        full_export_button.setObjectName("secondary")
         full_export_button.clicked.connect(self.export_full_class)
         full_export_layout.addWidget(full_export_button)
         
@@ -62,6 +63,7 @@ class ExportView(QWidget):
         
         # Student roster export
         roster_export_layout = QHBoxLayout()
+        
         roster_export_label = QLabel("Student Roster (CSV):")
         roster_export_label.setStyleSheet("font-weight: bold;")
         roster_export_layout.addWidget(roster_export_label)
@@ -72,6 +74,7 @@ class ExportView(QWidget):
         roster_export_layout.addStretch()
         
         roster_export_button = QPushButton("Export")
+        roster_export_button.setObjectName("secondary")
         roster_export_button.clicked.connect(self.export_student_roster)
         roster_export_layout.addWidget(roster_export_button)
         

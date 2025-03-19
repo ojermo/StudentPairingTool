@@ -57,6 +57,7 @@ class PairingScreen(QWidget):
         options_layout.addStretch()
         
         generate_button = QPushButton("Generate Pairings")
+        generate_button.setObjectName("secondary")
         generate_button.clicked.connect(self.generate_pairings)
         options_layout.addWidget(generate_button)
         
@@ -89,10 +90,12 @@ class PairingScreen(QWidget):
         actions_layout.addStretch()
         
         save_button = QPushButton("Save & Share")
+        save_button.setObjectName("secondary")
         save_button.clicked.connect(self.save_pairings)
         actions_layout.addWidget(save_button)
         
         present_button = QPushButton("Present")
+        present_button.setObjectName("secondary")
         present_button.clicked.connect(self.present_pairings)
         actions_layout.addWidget(present_button)
         

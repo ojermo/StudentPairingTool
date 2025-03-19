@@ -124,3 +124,25 @@ QLineEdit, QTextEdit, QComboBox {
     border-radius: 3px;
     background-color: white;
 }
+
+/* Options frame */
+QFrame#optionsFrame {
+    background-color: #f9f9f9;
+    border: 1px solid #dadada;
+    border-radius: 5px;
+    padding: 10px;
+}
+
+/* Label styles that could be reused */
+QLabel.sectionTitle {
+    font-size: 20px;
+    font-weight: bold;
+}
+
+QLabel.boldLabel {
+    font-weight: bold;
+}
+
+QLabel.descriptionText {
+    color: #666666;
+}

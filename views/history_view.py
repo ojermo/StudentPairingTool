@@ -74,6 +74,7 @@ class HistoryView(QWidget):
         
         present_button = QPushButton("Present")
         present_button.clicked.connect(self.present_session)
+        present_button.setObjectName("secondary")
         actions_layout.addWidget(present_button)
         
         content_layout.addLayout(actions_layout)

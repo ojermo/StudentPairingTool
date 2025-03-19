@@ -47,6 +47,7 @@ class StudentRosterView(QWidget):
         header_layout.addStretch()
         
         add_student_button = QPushButton("+ Add New Student")
+        add_student_button.setObjectName("secondary")
         add_student_button.clicked.connect(self.add_new_student)
         header_layout.addWidget(add_student_button)
         
@@ -71,12 +72,14 @@ class StudentRosterView(QWidget):
         
         mark_all_button = QPushButton("Mark All Present")
         mark_all_button.clicked.connect(self.mark_all_present)
+        mark_all_button.setObjectName("secondary")
         buttons_layout.addWidget(mark_all_button)
         
         buttons_layout.addStretch()
         
         proceed_button = QPushButton("Proceed to Pairing")
         proceed_button.clicked.connect(self.proceed_to_pairing)
+        proceed_button.setObjectName("secondary")
         buttons_layout.addWidget(proceed_button)
         
         content_layout.addLayout(buttons_layout)
@@ -135,12 +138,15 @@ class StudentRosterView(QWidget):
             
             edit_button = QPushButton("Edit")
             edit_button.setFixedSize(50, 25)
+            edit_button.setObjectName("secondary")
             
             absent_button = QPushButton("Absent")
             absent_button.setFixedSize(55, 25)
+            absent_button.setObjectName("secondary")
             
             delete_button = QPushButton("X")
             delete_button.setFixedSize(25, 25)
+            delete_button.setObjectName("tertiary")
             
             actions_layout.addWidget(edit_button)
             actions_layout.addWidget(absent_button)
