@@ -3,10 +3,32 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QTableWidget, QTableWidgetItem, QFrame,
-    QHeaderView, QCheckBox, QMessageBox
+    QHeaderView, QCheckBox, QMessageBox, QDialog
 )
 from PySide6.QtCore import Qt
-from utils.ui_helpers import setup_navigation_bar
+from utils.ui_helpers import (
+    setup_navigation_bar, extract_track_abbreviation, find_full_track_name
+)
+
+try:
+    from models.student_model import Student
+except ImportError:
+    # Fallback if import fails
+    import uuid
+    class Student:
+        def __init__(self, name="", track=""):
+            self.id = str(uuid.uuid4())
+            self.name = name
+            self.track = track
+            self.times_in_group_of_three = 0
+            
+        def to_dict(self):
+            return {
+                "id": self.id,
+                "name": self.name,
+                "track": self.track,
+                "times_in_group_of_three": self.times_in_group_of_three
+            }
 
 class StudentRosterView(QWidget):
     """View for managing the student roster and attendance."""
@@ -57,9 +79,20 @@ class StudentRosterView(QWidget):
         self.student_table = QTableWidget()
         self.student_table.setColumnCount(5)
         self.student_table.setHorizontalHeaderLabels(["Name", "Track", "Times in Group of 3", "Present", "Actions"])
-        self.student_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.student_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.student_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.student_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)  # Name column stretches
+        self.student_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)  # Other columns fixed
+        self.student_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+        self.student_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.student_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Fixed)
+        
+        # Set fixed widths for non-stretching columns
+        self.student_table.setColumnWidth(1, 120)  # Track column
+        self.student_table.setColumnWidth(2, 100)  # Times in Group of 3
+        self.student_table.setColumnWidth(3, 100)  # Present checkbox
+        self.student_table.setColumnWidth(4, 200)  # Actions
+        
+        # Set row height
+        self.student_table.verticalHeader().setDefaultSectionSize(40)
         
         content_layout.addWidget(self.student_table)
         
@@ -101,6 +134,10 @@ class StudentRosterView(QWidget):
         # Clear table
         self.student_table.setRowCount(0)
         
+        # Update header for "Times in Group of 3"
+        header_item = QTableWidgetItem("Times in\nGroup of 3")
+        self.student_table.setHorizontalHeaderItem(2, header_item)
+        
         # Add students
         students = self.class_data.get("students", {})
         
@@ -111,12 +148,16 @@ class StudentRosterView(QWidget):
             name_item = QTableWidgetItem(student.get("name", ""))
             self.student_table.setItem(i, 0, name_item)
             
-            # Track
-            track_item = QTableWidgetItem(student.get("track", ""))
+            # Track (abbreviated)
+            full_track = student.get("track", "")
+            abbreviated_track = extract_track_abbreviation(full_track)
+            track_item = QTableWidgetItem(abbreviated_track)
+            track_item.setTextAlignment(Qt.AlignCenter)  # Center the track name
             self.student_table.setItem(i, 1, track_item)
             
             # Times in group of 3
             times_item = QTableWidgetItem(str(student.get("times_in_group_of_three", 0)))
+            times_item.setTextAlignment(Qt.AlignCenter)  # Center the number
             self.student_table.setItem(i, 2, times_item)
             
             # Present checkbox
@@ -134,25 +175,74 @@ class StudentRosterView(QWidget):
             # Actions
             actions_cell = QWidget()
             actions_layout = QHBoxLayout(actions_cell)
-            actions_layout.setContentsMargins(5, 5, 5, 5)
-            
+            actions_layout.setContentsMargins(10, 5, 10, 5)
+            actions_layout.setSpacing(10)
+
             edit_button = QPushButton("Edit")
-            edit_button.setFixedSize(50, 25)
+            edit_button.setFixedWidth(80)
             edit_button.setObjectName("secondary")
-            
-            absent_button = QPushButton("Absent")
-            absent_button.setFixedSize(55, 25)
-            absent_button.setObjectName("secondary")
-            
-            delete_button = QPushButton("X")
-            delete_button.setFixedSize(25, 25)
+            # Connect the edit button to the edit_student method with the student ID
+            edit_button.clicked.connect(lambda checked=False, sid=student_id: self.edit_student(sid))
+
+            delete_button = QPushButton("Delete")
+            delete_button.setFixedWidth(80)
             delete_button.setObjectName("tertiary")
-            
+            # Connect the delete button to the delete_student method with the student ID
+            delete_button.clicked.connect(lambda checked=False, sid=student_id: self.delete_student(sid))
+
             actions_layout.addWidget(edit_button)
-            actions_layout.addWidget(absent_button)
             actions_layout.addWidget(delete_button)
-            
+
             self.student_table.setCellWidget(i, 4, actions_cell)
+
+    def delete_student(self, student_id):
+        """
+        Delete a student from the class.
+        
+        Args:
+            student_id: ID of the student to delete
+        """
+        if not self.class_data:
+            return
+        
+        # Get the student name for the confirmation message
+        student = self.class_data["students"].get(student_id)
+        if not student:
+            self.main_window.show_message(
+                "Error",
+                "Student not found.",
+                QMessageBox.Warning
+            )
+            return
+        
+        student_name = student.get("name", "Unknown Student")
+        
+        # Show confirmation dialog
+        confirmation = self.main_window.confirm_action(
+            "Confirm Deletion",
+            f"Are you sure you want to delete student '{student_name}'? This action cannot be undone."
+        )
+        
+        if confirmation:
+            # Remove the student from the class data
+            del self.class_data["students"][student_id]
+            
+            # Save class data
+            success = self.file_handler.save_class(self.class_data)
+            
+            if success:
+                # Refresh table
+                self.refresh_student_table()
+                self.main_window.show_message(
+                    "Student Deleted",
+                    f"Student '{student_name}' was deleted successfully."
+                )
+            else:
+                self.main_window.show_message(
+                    "Error",
+                    "Failed to save changes after deletion. Please try again.",
+                    QMessageBox.Warning
+                )
     
     def mark_all_present(self):
         """Mark all students as present."""
@@ -165,12 +255,100 @@ class StudentRosterView(QWidget):
     
     def add_new_student(self):
         """Add a new student to the class."""
-        # This would normally open a dialog
-        self.main_window.show_message(
-            "Not Implemented",
-            "Adding new students is not implemented in this version.",
-            QMessageBox.Information
-        )
+        if not self.class_data:
+            return
+        
+        # Get available tracks from class
+        tracks = self.class_data.get("tracks", [])
+        
+        # Show dialog
+        from views.add_student_dialog import AddStudentDialog
+        dialog = AddStudentDialog(self, tracks)
+        
+        if dialog.exec() == QDialog.Accepted:
+            student_data = dialog.get_student_data()
+            
+            # Create new student
+            try:
+                from models.student_model import Student
+                student = Student(name=student_data["name"], track=student_data["track"])
+                
+                # Add to class data
+                self.class_data["students"][student.id] = student.to_dict()
+                
+                # Save class data
+                success = self.file_handler.save_class(self.class_data)
+                
+                if success:
+                    # Refresh table
+                    self.refresh_student_table()
+                    self.main_window.show_message(
+                        "Student Added",
+                        f"Student '{student.name}' was added successfully."
+                    )
+                else:
+                    self.main_window.show_message(
+                        "Error",
+                        "Failed to save the student. Please try again.",
+                        QMessageBox.Warning
+                    )
+            except Exception as e:
+                self.main_window.show_message(
+                    "Error",
+                    f"Failed to add student: {str(e)}",
+                    QMessageBox.Warning
+                )
+    
+    def edit_student(self, student_id):
+        """
+        Edit an existing student.
+        
+        Args:
+            student_id: ID of the student to edit
+        """
+        if not self.class_data:
+            return
+        
+        # Get the student data
+        student = self.class_data["students"].get(student_id)
+        if not student:
+            self.main_window.show_message(
+                "Error",
+                "Student not found.",
+                QMessageBox.Warning
+            )
+            return
+        
+        # Get available tracks from class
+        tracks = self.class_data.get("tracks", [])
+        
+        # Show dialog
+        from views.add_student_dialog import AddStudentDialog
+        dialog = AddStudentDialog(self, tracks, student)
+        
+        if dialog.exec() == QDialog.Accepted:
+            updated_student_data = dialog.get_student_data()
+            
+            # Update student data while preserving the ID and other fields
+            student["name"] = updated_student_data["name"]
+            student["track"] = updated_student_data["track"]
+            
+            # Save class data
+            success = self.file_handler.save_class(self.class_data)
+            
+            if success:
+                # Refresh table
+                self.refresh_student_table()
+                self.main_window.show_message(
+                    "Student Updated",
+                    f"Student '{student['name']}' was updated successfully."
+                )
+            else:
+                self.main_window.show_message(
+                    "Error",
+                    "Failed to save changes. Please try again.",
+                    QMessageBox.Warning
+                )    
     
     def proceed_to_pairing(self):
         """Proceed to the pairing screen."""

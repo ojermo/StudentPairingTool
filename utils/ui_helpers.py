@@ -65,3 +65,46 @@ def setup_navigation_bar(parent, current_tab="dashboard"):
         export_btn.setStyleSheet("font-weight: bold;")
     
     return tabs_layout
+
+def extract_track_abbreviation(track_name):
+    """
+    Extract just the abbreviation from a track name.
+    Example: "FNP (Family Nurse Practitioner)" -> "FNP"
+    """
+    if not track_name:
+        return ""
+    
+    # Check if the track has a format like "FNP (Full Name)"
+    if "(" in track_name:
+        abbreviation = track_name.split("(")[0].strip()
+        return abbreviation
+    
+    # If there's no parenthesis, return the first word or the whole string if it's short
+    words = track_name.split()
+    if len(words) > 1 and len(track_name) > 15:
+        return words[0]
+    
+    return track_name
+    
+def find_full_track_name(tracks, abbreviation):
+    """
+    Find the full track name from an abbreviation.
+    
+    Args:
+        tracks: List of available track names
+        abbreviation: Abbreviated track name (e.g., "FNP")
+        
+    Returns:
+        Full track name or the abbreviation if not found
+    """
+    for track in tracks:
+        # Check if track starts with the abbreviation
+        if track.startswith(abbreviation):
+            return track
+        
+        # Check if the abbreviation is in parentheses
+        if f"({abbreviation})" in track:
+            return track
+    
+    # If no match is found, return the abbreviation itself
+    return abbreviation
