@@ -77,12 +77,12 @@ class PairingScreen(QWidget):
         
         # Pairing options
         options_layout = QHBoxLayout()
-        
+
         track_label = QLabel("Track Pairing:")
         options_layout.addWidget(track_label)
-        
+
         self.track_combo = QComboBox()
-        self.track_combo.addItems(["Same track preferred", "Different tracks preferred", "No track preference"])
+        self.track_combo.addItems(["No track preference", "Same track preferred", "Different tracks preferred"])
         options_layout.addWidget(self.track_combo)
         
         options_layout.addStretch()

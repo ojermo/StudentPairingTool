@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from datetime import datetime
 
 class PairDisplay(QFrame):
-    """Widget for displaying a student pair in presentation mode."""
+    """Widget representing a student pair in presentation mode."""
     
     def __init__(self, pair_data, pair_number):
         super().__init__()
@@ -36,6 +36,8 @@ class PairDisplay(QFrame):
                 student_label = QLabel(f"Student ID: {student_id}")
                 student_label.setStyleSheet("font-size: 16px; padding: 5px;")
                 student_label.setAlignment(Qt.AlignCenter)
+                student_label.setWordWrap(True)  # Allow text wrapping
+                student_label.setMinimumHeight(50)  # Set minimum height for wrapped text
                 layout.addWidget(student_label)
         else:
             # Display student info from the list
@@ -45,6 +47,8 @@ class PairDisplay(QFrame):
                 student_label = QLabel(f"{student_name} ({student_track})")
                 student_label.setStyleSheet("font-size: 16px; padding: 5px;")
                 student_label.setAlignment(Qt.AlignCenter)
+                student_label.setWordWrap(True)  # Allow text wrapping
+                student_label.setMinimumHeight(50)  # Set minimum height for wrapped text
                 layout.addWidget(student_label)
 
 
@@ -57,6 +61,7 @@ class PresentationView(QWidget):
         self.file_handler = main_window.file_handler
         self.class_data = None
         self.session_data = None
+        self.showing_absent = False  # Flag to track which pairs are being displayed
         
         self.setup_ui()
     
@@ -98,6 +103,13 @@ class PresentationView(QWidget):
     
         # Controls at bottom
         controls_layout = QHBoxLayout()
+        
+        # Toggle present/absent button
+        self.toggle_button = QPushButton("Show Absent Pairs")
+        self.toggle_button.setObjectName("secondary")
+        self.toggle_button.clicked.connect(self.toggle_absent_pairs)
+        controls_layout.addWidget(self.toggle_button)
+        
         controls_layout.addStretch()
     
         back_button = QPushButton("Back to Tool")
@@ -117,6 +129,10 @@ class PresentationView(QWidget):
         """Load a session into the view."""
         self.class_data = class_data
         self.session_data = session_data
+        self.showing_absent = False  # Reset to showing present pairs
+        
+        # Update the toggle button text
+        self.toggle_button.setText("Show Absent Pairs")
         
         # Update the date label if the session has a date
         if session_data and "date" in session_data:
@@ -126,6 +142,21 @@ class PresentationView(QWidget):
             except:
                 self.date_label.setText("Session Date")
         
+        self.display_pairs()
+    
+    def toggle_absent_pairs(self):
+        """Toggle between showing present and absent pairs."""
+        self.showing_absent = not self.showing_absent
+        
+        # Update button text
+        if self.showing_absent:
+            self.toggle_button.setText("Show Present Pairs")
+            self.title_label.setText("Absent Pairings")
+        else:
+            self.toggle_button.setText("Show Absent Pairs")
+            self.title_label.setText("Today's Pairings")
+        
+        # Refresh the display
         self.display_pairs()
     
     def display_pairs(self):
@@ -144,9 +175,9 @@ class PresentationView(QWidget):
             self.pairs_layout.addWidget(placeholder, 0, 0)
             return
         
-        # Get present pairs
+        # Get pairs based on present/absent selection
         pairs = self.session_data.get("pairs", [])
-        present_pairs = [p for p in pairs if p.get("present", True)]
+        filtered_pairs = [p for p in pairs if p.get("present", True) != self.showing_absent]
         
         # Create lookup for student data
         students = self.class_data.get("students", {})
@@ -155,7 +186,7 @@ class PresentationView(QWidget):
         row, col = 0, 0
         max_cols = 3  # Number of columns in the grid
         
-        for i, pair in enumerate(present_pairs):
+        for i, pair in enumerate(filtered_pairs):
             # Add student data to the pair
             pair_with_data = pair.copy()
             pair_with_data["student"] = []
@@ -175,8 +206,8 @@ class PresentationView(QWidget):
                 row += 1
         
         # If no pairs were added, show a message
-        if not present_pairs:
-            no_pairs = QLabel("No pairs to display")
+        if not filtered_pairs:
+            no_pairs = QLabel(f"No {'absent' if self.showing_absent else 'present'} pairs to display")
             no_pairs.setAlignment(Qt.AlignCenter)
             no_pairs.setStyleSheet("font-size: 18px; color: #666666;")
             self.pairs_layout.addWidget(no_pairs, 0, 0)

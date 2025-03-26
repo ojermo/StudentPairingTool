@@ -57,7 +57,7 @@ class PairingAlgorithm:
         The score is based on:
         1. Whether they've been paired before (high penalty)
         2. Track matching according to preference
-        3. Times in group of three (try to balance)
+        3. Times in group of three (exponential penalty)
         """
         s1 = self.student_lookup[student_id1]
         s2 = self.student_lookup[student_id2]
@@ -78,9 +78,23 @@ class PairingAlgorithm:
         else:  # "none"
             track_score = 0  # No preference
         
-        # 3. Group of three balance
-        group3_balance = abs(s1.get("times_in_group_of_three", 0) - 
-                            s2.get("times_in_group_of_three", 0))
+        # 3. Group of three balance with improved exponential penalty
+        s1_count = s1.get("times_in_group_of_three", 0)
+        s2_count = s2.get("times_in_group_of_three", 0)
+        
+        # For students who've never been in a group of three, zero penalty
+        # For others, start at 20 and double with each occurrence
+        if s1_count == 0:
+            s1_penalty = 0
+        else:
+            s1_penalty = 20 * (2**(s1_count-1))
+            
+        if s2_count == 0:
+            s2_penalty = 0
+        else:
+            s2_penalty = 20 * (2**(s2_count-1))
+            
+        group3_balance = s1_penalty + s2_penalty
         
         # Total score (lower is better)
         return previous_pair_penalty + track_score + group3_balance
@@ -115,13 +129,43 @@ class PairingAlgorithm:
                 best_pair = None
                 best_score = float('inf')
                 
+                # Get the group-of-three count for the remaining student
+                last_student_id = remaining_students[0]
+                last_student = self.student_lookup[last_student_id]
+                last_student_g3_count = last_student.get("times_in_group_of_three", 0)
+                
                 for pair in pairings:
                     if len(pair) == 2:  # Only consider pairs, not triplets
-                        # Calculate score for adding student to this pair
-                        score = sum(self.calculate_pair_score(remaining_students[0], p, 
-                                                             track_preference) for p in pair)
-                        if score < best_score:
-                            best_score = score
+                        # Calculate a score for adding this student to this pair
+                        # First, look at how many times each person has been in a group of three
+                        pair_students = [self.student_lookup[pid] for pid in pair]
+                        pair_g3_counts = [s.get("times_in_group_of_three", 0) for s in pair_students]
+                        
+                        # Calculate the score using our improved exponential formula
+                        pair_penalties = []
+                        for count in pair_g3_counts:
+                            if count == 0:
+                                pair_penalties.append(0)
+                            else:
+                                pair_penalties.append(20 * (2**(count-1)))
+                        
+                        # Add penalty for the last student too
+                        if last_student_g3_count == 0:
+                            last_penalty = 0
+                        else:
+                            last_penalty = 20 * (2**(last_student_g3_count-1))
+                        
+                        # Total group of three penalty
+                        g3_score = sum(pair_penalties) + last_penalty
+                        
+                        # Also consider standard pairing criteria
+                        pair_score = sum(self.calculate_pair_score(last_student_id, p, track_preference) for p in pair)
+                        
+                        # Combined score
+                        total_score = g3_score + pair_score
+                        
+                        if total_score < best_score:
+                            best_score = total_score
                             best_pair = pair
                 
                 # Add student to best pair or create singleton if no pairs
