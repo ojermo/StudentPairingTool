@@ -351,10 +351,52 @@ class StudentRosterView(QWidget):
                 )    
     
     def proceed_to_pairing(self):
-        """Proceed to the pairing screen."""
-        # This would save attendance and move to pairing screen
-        if self.class_data:
-            self.main_window.show_pairing_screen(self.class_data)
+        """Proceed to the pairing screen with attendance data."""
+        if not self.class_data:
+            return
+        
+        # Collect attendance data
+        present_student_ids = []
+        absent_student_ids = []
+        
+        # Go through each row in the table
+        for i in range(self.student_table.rowCount()):
+            # Get the student ID from the row
+            student_id = None
+            
+            # Find the student ID by matching the name
+            name_item = self.student_table.item(i, 0)
+            if name_item:
+                student_name = name_item.text()
+                # Find the student with this name
+                for sid, student in self.class_data.get("students", {}).items():
+                    if student.get("name", "") == student_name:
+                        student_id = sid
+                        break
+            
+            if not student_id:
+                continue
+            
+            # Check if the student is marked as present
+            present_widget = self.student_table.cellWidget(i, 3)
+            if present_widget:
+                checkbox = present_widget.findChild(QCheckBox)
+                if checkbox and checkbox.isChecked():
+                    present_student_ids.append(student_id)
+                else:
+                    absent_student_ids.append(student_id)
+        
+        # Update the class data with attendance
+        self.class_data["attendance"] = {
+            "present": present_student_ids,
+            "absent": absent_student_ids
+        }
+        
+        # Save the class data with attendance
+        self.file_handler.save_class(self.class_data)
+        
+        # Show the pairing screen
+        self.main_window.show_pairing_screen(self.class_data)
         
     def go_to_students(self):
         """Navigate to the students view."""

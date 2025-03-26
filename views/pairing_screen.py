@@ -88,6 +88,7 @@ class PairingScreen(QWidget):
         options_layout.addStretch()
         
         generate_button = QPushButton("Generate Pairings")
+        generate_button.setObjectName("secondary")
         generate_button.clicked.connect(self.generate_pairings)
         options_layout.addWidget(generate_button)
         
@@ -164,9 +165,7 @@ class PairingScreen(QWidget):
         """
         Get lists of present and absent students from the student roster.
         
-        This would typically check the checkboxes in the student roster view,
-        but for now we'll simulate by assuming all students are present
-        or randomly marking some as absent.
+        Uses the attendance data collected in the student roster view.
         
         Returns:
             tuple: (present_students, absent_students) as lists of dictionaries
@@ -174,20 +173,21 @@ class PairingScreen(QWidget):
         if not self.class_data:
             return [], []
         
-        # In a real implementation, this would get the actual attendance data
-        # from the student roster view
-        students = list(self.class_data.get("students", {}).values())
+        # Get student dictionaries
+        students_dict = self.class_data.get("students", {})
         
-        # For testing purposes, randomly mark ~20% of students as absent
-        present_students = []
-        absent_students = []
+        # Get attendance data
+        attendance = self.class_data.get("attendance", {})
+        present_ids = attendance.get("present", [])
+        absent_ids = attendance.get("absent", [])
         
-        for student in students:
-            # Random attendance (80% present, 20% absent)
-            if random.random() < 0.8:
-                present_students.append(student)
-            else:
-                absent_students.append(student)
+        # If no attendance data is available, default to all present
+        if not present_ids and not absent_ids:
+            return list(students_dict.values()), []
+        
+        # Create present and absent student lists
+        present_students = [students_dict[sid] for sid in present_ids if sid in students_dict]
+        absent_students = [students_dict[sid] for sid in absent_ids if sid in students_dict]
         
         return present_students, absent_students
     
