@@ -71,7 +71,7 @@ class PairingAlgorithm:
         # 2. Track preference score
         if track_preference == "same":
             # Prefer same track, penalty for different
-            track_score = 0 if s1["track"] == s2["track"] else a = 10
+            track_score = 0 if s1["track"] == s2["track"] else 10
         elif track_preference == "different":
             # Prefer different track, penalty for same
             track_score = 0 if s1["track"] != s2["track"] else 10

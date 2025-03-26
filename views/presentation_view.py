@@ -1,8 +1,51 @@
+# views/presentation_view.py
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QMessageBox
+    QFrame, QMessageBox, QGridLayout
 )
 from PySide6.QtCore import Qt
+from datetime import datetime
+
+class PairDisplay(QFrame):
+    """Widget for displaying a student pair in presentation mode."""
+    
+    def __init__(self, pair_data, pair_number):
+        super().__init__()
+        self.setObjectName("pairDisplay")
+        self.setStyleSheet(
+            "background-color: white; border: 1px solid #dadada; "
+            "border-radius: 8px; padding: 15px; margin: 10px;"
+        )
+        
+        layout = QVBoxLayout(self)
+        
+        # Pair number
+        number_label = QLabel(f"Pair {pair_number}")
+        number_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
+        number_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(number_label)
+        
+        # Student names with tracks
+        students_list = pair_data.get("student", [])
+        
+        # If empty, try to get students from class data using IDs
+        if not students_list:
+            # Just display student IDs as fallback
+            for student_id in pair_data.get("student_ids", []):
+                student_label = QLabel(f"Student ID: {student_id}")
+                student_label.setStyleSheet("font-size: 16px; padding: 5px;")
+                student_label.setAlignment(Qt.AlignCenter)
+                layout.addWidget(student_label)
+        else:
+            # Display student info from the list
+            for student in students_list:
+                student_name = student.get("name", "Unknown Student")
+                student_track = student.get("track", "")
+                student_label = QLabel(f"{student_name} ({student_track})")
+                student_label.setStyleSheet("font-size: 16px; padding: 5px;")
+                student_label.setAlignment(Qt.AlignCenter)
+                layout.addWidget(student_label)
 
 
 class PresentationView(QWidget):
@@ -20,30 +63,38 @@ class PresentationView(QWidget):
     def setup_ui(self):
         """Set up the presentation view UI."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(20, 20, 20, 20)
     
         # Title and date
         title_layout = QVBoxLayout()
     
         self.title_label = QLabel("Today's Pairings")
         self.title_label.setAlignment(Qt.AlignCenter)
-        self.title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #da532c;")
+        self.title_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #da532c;")
     
-        self.date_label = QLabel("Session Date")
+        self.date_label = QLabel(datetime.now().strftime("%A, %B %d, %Y"))
         self.date_label.setAlignment(Qt.AlignCenter)
-        self.date_label.setStyleSheet("font-size: 18px;")
+        self.date_label.setStyleSheet("font-size: 18px; margin-bottom: 20px;")
     
         title_layout.addWidget(self.title_label)
         title_layout.addWidget(self.date_label)
     
         main_layout.addLayout(title_layout)
     
+        # Pairs container
+        self.pairs_container = QWidget()
+        self.pairs_layout = QGridLayout(self.pairs_container)
+        self.pairs_layout.setContentsMargins(10, 10, 10, 10)
+        self.pairs_layout.setSpacing(15)
+        
         # Placeholder text
-        placeholder = QLabel("Presentation View - Not Yet Implemented")
+        placeholder = QLabel("No pairings to display")
         placeholder.setAlignment(Qt.AlignCenter)
         placeholder.setStyleSheet("font-size: 18px; color: #666666;")
-    
-        main_layout.addWidget(placeholder)
+        self.pairs_layout.addWidget(placeholder, 0, 0)
+        
+        main_layout.addWidget(self.pairs_container)
+        main_layout.addStretch()
     
         # Controls at bottom
         controls_layout = QHBoxLayout()
@@ -66,6 +117,69 @@ class PresentationView(QWidget):
         """Load a session into the view."""
         self.class_data = class_data
         self.session_data = session_data
+        
+        # Update the date label if the session has a date
+        if session_data and "date" in session_data:
+            try:
+                date_obj = datetime.fromisoformat(session_data["date"])
+                self.date_label.setText(date_obj.strftime("%A, %B %d, %Y"))
+            except:
+                self.date_label.setText("Session Date")
+        
+        self.display_pairs()
+    
+    def display_pairs(self):
+        """Display the pairs from the current session."""
+        # Clear existing layout
+        while self.pairs_layout.count():
+            item = self.pairs_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        
+        if not self.session_data or not self.class_data:
+            # No session data, show placeholder
+            placeholder = QLabel("No pairings to display")
+            placeholder.setAlignment(Qt.AlignCenter)
+            placeholder.setStyleSheet("font-size: 18px; color: #666666;")
+            self.pairs_layout.addWidget(placeholder, 0, 0)
+            return
+        
+        # Get present pairs
+        pairs = self.session_data.get("pairs", [])
+        present_pairs = [p for p in pairs if p.get("present", True)]
+        
+        # Create lookup for student data
+        students = self.class_data.get("students", {})
+        
+        # Populate the grid with pair displays
+        row, col = 0, 0
+        max_cols = 3  # Number of columns in the grid
+        
+        for i, pair in enumerate(present_pairs):
+            # Add student data to the pair
+            pair_with_data = pair.copy()
+            pair_with_data["student"] = []
+            
+            for student_id in pair.get("student_ids", []):
+                if student_id in students:
+                    pair_with_data["student"].append(students[student_id])
+            
+            # Create and add the pair display
+            pair_display = PairDisplay(pair_with_data, i + 1)
+            self.pairs_layout.addWidget(pair_display, row, col)
+            
+            # Move to the next column or row
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+        
+        # If no pairs were added, show a message
+        if not present_pairs:
+            no_pairs = QLabel("No pairs to display")
+            no_pairs.setAlignment(Qt.AlignCenter)
+            no_pairs.setStyleSheet("font-size: 18px; color: #666666;")
+            self.pairs_layout.addWidget(no_pairs, 0, 0)
     
     def go_back(self):
         """Go back to the pairing screen."""

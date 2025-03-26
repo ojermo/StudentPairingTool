@@ -217,6 +217,27 @@ class MainWindow(QMainWindow):
         msg_box.setDefaultButton(QMessageBox.No)
         return msg_box.exec() == QMessageBox.Yes
 
+    def get_save_file_path(self, title, default_filename, file_filter):
+        """
+        Show a save file dialog and return the selected path.
+        
+        Args:
+            title: Dialog title
+            default_filename: Default file name
+            file_filter: File type filter
+            
+        Returns:
+            Selected file path or None if cancelled
+        """
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            title,
+            default_filename,
+            file_filter
+        )
+        
+        return file_path if file_path else None
+
 
 if __name__ == "__main__":
     # Create application
