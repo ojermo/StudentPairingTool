@@ -101,11 +101,11 @@ class PairingAlgorithm:
     
     def generate_pairings(self, track_preference: str = "same") -> List[List[str]]:
         """
-        Generate optimal pairings for students.
+        Generate optimal pairings for students with a hierarchical approach.
         
         Args:
             track_preference: "same", "different", or "none"
-            
+                
         Returns:
             List of student ID lists (each inner list is a pair or triplet)
         """
@@ -116,84 +116,94 @@ class PairingAlgorithm:
         if len(self.students) == 2:
             return [[self.students[0]["id"], self.students[1]["id"]]]
         
-        # For larger groups, use a greedy algorithm
-        remaining_students = self.student_ids.copy()
+        # Step 1: Determine if groups of 3 will be needed and how many
+        num_students = len(self.students)
+        num_groups_of_3 = num_students % 2  # 1 if odd number of students, 0 if even
+        
+        # Step 2: Create student records with their ID, group-of-3 count, and previous pairs
+        student_records = []
+        for student in self.students:
+            student_id = student["id"]
+            previous_pairs = self.get_student_previous_pairs(student_id)
+            g3_count = student.get("times_in_group_of_three", 0)
+            
+            student_records.append({
+                "id": student_id,
+                "g3_count": g3_count,
+                "previous_pairs": previous_pairs
+            })
+        
+        # Step 3: Sort by times in group of 3 (ascending)
+        student_records.sort(key=lambda s: s["g3_count"])
+        
+        # Initialize the result
         pairings = []
         
-        # Shuffle to introduce randomness
-        random.shuffle(remaining_students)
-        
-        while len(remaining_students) > 0:
-            if len(remaining_students) == 1:
-                # Only one student left, find the best existing pair to join
-                best_pair = None
-                best_score = float('inf')
-                
-                # Get the group-of-three count for the remaining student
-                last_student_id = remaining_students[0]
-                last_student = self.student_lookup[last_student_id]
-                last_student_g3_count = last_student.get("times_in_group_of_three", 0)
-                
-                for pair in pairings:
-                    if len(pair) == 2:  # Only consider pairs, not triplets
-                        # Calculate a score for adding this student to this pair
-                        # First, look at how many times each person has been in a group of three
-                        pair_students = [self.student_lookup[pid] for pid in pair]
-                        pair_g3_counts = [s.get("times_in_group_of_three", 0) for s in pair_students]
-                        
-                        # Calculate the score using our improved exponential formula
-                        pair_penalties = []
-                        for count in pair_g3_counts:
-                            if count == 0:
-                                pair_penalties.append(0)
-                            else:
-                                pair_penalties.append(20 * (2**(count-1)))
-                        
-                        # Add penalty for the last student too
-                        if last_student_g3_count == 0:
-                            last_penalty = 0
-                        else:
-                            last_penalty = 20 * (2**(last_student_g3_count-1))
-                        
-                        # Total group of three penalty
-                        g3_score = sum(pair_penalties) + last_penalty
-                        
-                        # Also consider standard pairing criteria
-                        pair_score = sum(self.calculate_pair_score(last_student_id, p, track_preference) for p in pair)
-                        
-                        # Combined score
-                        total_score = g3_score + pair_score
-                        
-                        if total_score < best_score:
-                            best_score = total_score
-                            best_pair = pair
-                
-                # Add student to best pair or create singleton if no pairs
-                if best_pair:
-                    best_pair.append(remaining_students[0])
-                else:
-                    pairings.append([remaining_students[0]])
-                
-                remaining_students = []
+        # Step 4: If groups of 3 are needed, form them first with students who 
+        # have been in the fewest groups of 3
+        if num_groups_of_3 > 0:
+            # Take the first 3 students (those with the lowest group-of-3 counts)
+            group_of_3 = [student_records[0]["id"], 
+                         student_records[1]["id"], 
+                         student_records[2]["id"]]
+            pairings.append(group_of_3)
             
-            elif len(remaining_students) >= 2:
-                # Select first student
-                student1 = remaining_students.pop(0)
-                
-                # Find best partner for this student
-                best_partner = None
-                best_score = float('inf')
-                
-                for student2 in remaining_students:
-                    score = self.calculate_pair_score(student1, student2, track_preference)
+            # Remove these students from our records
+            student_records = student_records[3:]
+        
+        # Step 5: Pair the remaining students optimally
+        # Create all possible pairings and score them
+        while len(student_records) >= 2:
+            best_pair = None
+            best_score = float('inf')
+            
+            # Find the best pair among remaining students
+            for i in range(len(student_records)):
+                for j in range(i + 1, len(student_records)):
+                    student1 = student_records[i]
+                    student2 = student_records[j]
+                    
+                    # Check if they've been paired before (highest priority)
+                    if student2["id"] in student1["previous_pairs"]:
+                        repeat_penalty = 1000  # Very high penalty
+                    else:
+                        repeat_penalty = 0
+                    
+                    # Check track preference (lower priority)
+                    s1 = self.student_lookup[student1["id"]]
+                    s2 = self.student_lookup[student2["id"]]
+                    
+                    if track_preference == "same":
+                        track_score = 0 if s1["track"] == s2["track"] else 10
+                    elif track_preference == "different":
+                        track_score = 0 if s1["track"] != s2["track"] else 10
+                    else:  # "none"
+                        track_score = 0
+                    
+                    # Total score (lower is better)
+                    score = repeat_penalty + track_score
+                    
                     if score < best_score:
                         best_score = score
-                        best_partner = student2
+                        best_pair = [student1["id"], student2["id"]]
+            
+            # Add the best pair to our pairings
+            if best_pair:
+                pairings.append(best_pair)
                 
-                # Form the pair
-                if best_partner:
-                    remaining_students.remove(best_partner)
-                    pairings.append([student1, best_partner])
+                # Remove these students from consideration
+                student_records = [s for s in student_records 
+                                  if s["id"] not in best_pair]
+            else:
+                # Fallback: just pair the first two students
+                pairings.append([student_records[0]["id"], 
+                               student_records[1]["id"]])
+                student_records = student_records[2:]
+        
+        # Handle any remaining student (should not happen with our logic)
+        if student_records:
+            # If there's one student left, make them a singleton
+            pairings.append([student_records[0]["id"]])
         
         return pairings
     
