@@ -2,9 +2,11 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFrame, QScrollArea, QMessageBox, QGridLayout
+    QComboBox, QFrame, QScrollArea, QMessageBox, QGridLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QAbstractSpinBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
+from PySide6.QtGui import QColor
 from utils.ui_helpers import setup_navigation_bar
 from datetime import datetime
 import random
@@ -78,6 +80,21 @@ class PairingScreen(QWidget):
         # Pairing options
         options_layout = QHBoxLayout()
 
+        # Session date selection
+        date_label = QLabel("Session Date:")
+        options_layout.addWidget(date_label)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(False) # No calendar pop-up please
+        self.date_edit.setDate(QDate.currentDate()) # Default to today's date
+        self.date_edit.setDisplayFormat("MM/dd/yyyy") # Specify date input format
+        self.date_edit.setMinimumWidth(100) # Make it wide enough
+        self.date_edit.setButtonSymbols(QAbstractSpinBox.NoButtons) # This line removes the up/down arrows:
+        options_layout.addWidget(self.date_edit)
+        
+        # Add some spacing
+        options_layout.addSpacing(15)
+
+        # Track preference controls
         track_label = QLabel("Track Pairing:")
         options_layout.addWidget(track_label)
 
@@ -88,6 +105,7 @@ class PairingScreen(QWidget):
         options_layout.addStretch()
         
         generate_button = QPushButton("Generate Pairings")
+        generate_button.setObjectName("generate_button")
         generate_button.setObjectName("secondary")
         generate_button.clicked.connect(self.generate_pairings)
         options_layout.addWidget(generate_button)
@@ -112,26 +130,21 @@ class PairingScreen(QWidget):
         
         # Bottom actions
         actions_layout = QHBoxLayout()
-        
-        regenerate_button = QPushButton("Regenerate")
-        regenerate_button.setObjectName("secondary")
-        regenerate_button.clicked.connect(self.generate_pairings)
-        actions_layout.addWidget(regenerate_button)
-        
+
+        self.regenerate_button = QPushButton("Regenerate")
+        self.regenerate_button.setObjectName("secondary")
+        self.regenerate_button.clicked.connect(self.generate_pairings)
+        self.regenerate_button.setEnabled(False)  # Initially disabled
+        actions_layout.addWidget(self.regenerate_button)
+
         actions_layout.addStretch()
-        
-        self.save_button = QPushButton("Save & Share")
-        self.save_button.setObjectName("secondary")
-        self.save_button.clicked.connect(self.save_pairings)
-        self.save_button.setEnabled(False)  # Disabled until pairings are generated
-        actions_layout.addWidget(self.save_button)
-        
-        self.present_button = QPushButton("Present")
-        self.present_button.setObjectName("secondary")
-        self.present_button.clicked.connect(self.present_pairings)
-        self.present_button.setEnabled(False)  # Disabled until pairings are generated
-        actions_layout.addWidget(self.present_button)
-        
+
+        self.save_present_button = QPushButton("Save and Present")
+        self.save_present_button.setObjectName("secondary")
+        self.save_present_button.clicked.connect(self.save_and_present)
+        self.save_present_button.setEnabled(False)
+        actions_layout.addWidget(self.save_present_button)
+
         content_layout.addLayout(actions_layout)
         
         main_layout.addWidget(content_frame)
@@ -141,8 +154,15 @@ class PairingScreen(QWidget):
         self.class_data = class_data
         self.current_pairings = None
         self.current_session = None
-        self.save_button.setEnabled(False)
-        self.present_button.setEnabled(False)
+        
+        # Reset button states
+        self.save_present_button.setEnabled(False)  # Changed from self.save_button
+        self.regenerate_button.setEnabled(False)
+        
+        # Find and reenable the Generate Pairings button
+        generate_button = self.findChild(QPushButton, "generate_button")
+        if generate_button:
+            generate_button.setEnabled(True)
         
         # Reset the results area
         self.clear_results()
@@ -190,7 +210,22 @@ class PairingScreen(QWidget):
         absent_students = [students_dict[sid] for sid in absent_ids if sid in students_dict]
         
         return present_students, absent_students
-    
+
+    def save_and_present(self):
+        """Save the pairings and then present them."""
+        # First save the pairings
+        session_id = self.create_session()
+        
+        if session_id:
+            # Then present them
+            self.present_pairings()
+        else:
+            self.main_window.show_message(
+                "Save Failed",
+                "Failed to save the pairings. Cannot present.",
+                QMessageBox.Warning
+            )
+
     def generate_pairings(self):
         """Generate student pairings."""
         if not self.class_data:
@@ -221,6 +256,11 @@ class PairingScreen(QWidget):
         
         # Get previous sessions for pairing history
         previous_sessions = self.class_data.get("sessions", [])
+        
+        # Add randomness - shuffle students before generating pairs
+        import random
+        random.shuffle(present_students)
+        random.shuffle(absent_students)
         
         # Generate pairings for present students
         present_pairings = []
@@ -277,91 +317,116 @@ class PairingScreen(QWidget):
         # Display the pairings
         self.display_pairings(present_pairings, absent_pairings)
         
-        # Enable the save and present buttons
-        self.save_button.setEnabled(True)
-        self.present_button.setEnabled(True)
-    
+        # Update button states
+        self.regenerate_button.setEnabled(True)
+        generate_button = self.findChild(QPushButton, "generate_button")
+        if generate_button:
+            generate_button.setEnabled(False)
+        self.save_present_button.setEnabled(True)
+   
     def display_pairings(self, present_pairings, absent_pairings):
         """
-        Display the generated pairings in the UI.
+        Display the generated pairings in a table format consistent with history view.
         
         Args:
             present_pairings: List of pairing data for present students
             absent_pairings: List of pairing data for absent students
         """
-        # Add a section header for present students
+        # Clear previous results
+        self.clear_results()
+        
+        # Create table for present students
         if present_pairings:
             present_header = QLabel("Present Students")
             present_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
             self.results_layout.addWidget(present_header)
             
-            # Create a grid layout for the pairs
-            grid_layout = QGridLayout()
-            grid_layout.setContentsMargins(0, 10, 0, 10)
-            grid_layout.setSpacing(10)
+            # Create table
+            present_table = QTableWidget()
+            present_table.setColumnCount(4)
+            present_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Status"])
+            present_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            present_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            present_table.setRowCount(len(present_pairings))
             
-            # Add pair cards to the grid
-            row, col = 0, 0
-            max_cols = 3  # Number of columns in the grid
-            
-            for pair_data in present_pairings:
-                pair_card = PairCard(pair_data)
-                grid_layout.addWidget(pair_card, row, col)
+            # Add pairs to table
+            for i, pair in enumerate(present_pairings):
+                # Pair number
+                pair_item = QTableWidgetItem(str(i + 1))
+                pair_item.setTextAlignment(Qt.AlignCenter)
+                present_table.setItem(i, 0, pair_item)
                 
-                # Move to the next column or row
-                col += 1
-                if col >= max_cols:
-                    col = 0
-                    row += 1
+                # Student names
+                student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
+                names_item = QTableWidgetItem(", ".join(student_names))
+                present_table.setItem(i, 1, names_item)
+                
+                # Tracks
+                student_tracks = [s.get("track", "") for s in pair.get("students", [])]
+                tracks_item = QTableWidgetItem(", ".join(student_tracks))
+                present_table.setItem(i, 2, tracks_item)
+                
+                # Status
+                status_item = QTableWidgetItem("Present")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                status_item.setForeground(Qt.darkGreen)
+                present_table.setItem(i, 3, status_item)
             
-            # Add the grid to the results layout
-            grid_widget = QWidget()
-            grid_widget.setLayout(grid_layout)
-            self.results_layout.addWidget(grid_widget)
+            self.results_layout.addWidget(present_table)
         else:
             # No present students message
             no_present = QLabel("No present students to pair")
             no_present.setAlignment(Qt.AlignCenter)
-            no_present.setStyleSheet("color: #666666; font-size: 14px; padding::10px;")
+            no_present.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
             self.results_layout.addWidget(no_present)
         
-        # Add a section header for absent students
+        # Absent students table
         if absent_pairings:
-            self.results_layout.addSpacing(20)  # Add some space between sections
+            self.results_layout.addSpacing(20)
             
             absent_header = QLabel("Absent Students")
             absent_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #666666;")
             self.results_layout.addWidget(absent_header)
             
-            # Create a grid layout for the absent pairs
-            absent_grid = QGridLayout()
-            absent_grid.setContentsMargins(0, 10, 0, 10)
-            absent_grid.setSpacing(10)
+            # Create table
+            absent_table = QTableWidget()
+            absent_table.setColumnCount(4)
+            absent_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Status"])
+            absent_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            absent_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+            absent_table.setRowCount(len(absent_pairings))
             
-            # Add absent pair cards to the grid
-            row, col = 0, 0
-            max_cols = 3  # Number of columns in the grid
-            
-            for pair_data in absent_pairings:
-                pair_card = PairCard(pair_data, absent=True)
-                absent_grid.addWidget(pair_card, row, col)
+            # Add pairs to table
+            for i, pair in enumerate(absent_pairings):
+                # Pair number
+                pair_item = QTableWidgetItem(str(i + 1))
+                pair_item.setTextAlignment(Qt.AlignCenter)
+                absent_table.setItem(i, 0, pair_item)
                 
-                # Move to the next column or row
-                col += 1
-                if col >= max_cols:
-                    col = 0
-                    row += 1
+                # Student names
+                student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
+                names_item = QTableWidgetItem(", ".join(student_names))
+                absent_table.setItem(i, 1, names_item)
+                
+                # Tracks
+                student_tracks = [s.get("track", "") for s in pair.get("students", [])]
+                tracks_item = QTableWidgetItem(", ".join(student_tracks))
+                absent_table.setItem(i, 2, tracks_item)
+                
+                # Status
+                status_item = QTableWidgetItem("Absent")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                status_item.setForeground(Qt.darkRed)
+                absent_table.setItem(i, 3, status_item)
             
-            # Add the grid to the results layout
-            absent_grid_widget = QWidget()
-            absent_grid_widget.setLayout(absent_grid)
-            self.results_layout.addWidget(absent_grid_widget)
+            self.results_layout.addWidget(absent_table)
         else:
             # No absent students message
-            no_absent = QLabel("No absent students to pair")
-            no_absent.setAlignment(Qt.AlignCenter)
-            no_absent.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
-            self.results_layout.addWidget(no_absent)
+            if present_pairings:  # Only show if there are present students
+                no_absent = QLabel("No absent students")
+                no_absent.setAlignment(Qt.AlignCenter)
+                no_absent.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
+                self.results_layout.addWidget(no_absent)
         
         # Add stretch to push everything to the top
         self.results_layout.addStretch()
@@ -395,10 +460,12 @@ class PairingScreen(QWidget):
             str: Session ID if successful, None otherwise
         """
         import uuid
-        from datetime import datetime
         
         # Create unique session ID
         session_id = str(uuid.uuid4())
+        
+        # Get selected date
+        selected_date = self.date_edit.date().toString("yyyy-MM-dd")
         
         # Get present and absent student IDs
         present_student_ids = []
@@ -428,10 +495,10 @@ class PairingScreen(QWidget):
                 "present": False
             })
         
-        # Create session data
+        # Create session data with selected date
         session_data = {
             "id": session_id,
-            "date": datetime.now().isoformat(),
+            "date": selected_date + "T00:00:00",  # ISO format with time component
             "track_preference": self.current_pairings["track_preference"],
             "present_student_ids": present_student_ids,
             "absent_student_ids": absent_student_ids,
