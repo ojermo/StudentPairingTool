@@ -115,7 +115,7 @@ class PairingAlgorithm:
         return best_triplet or []
     
     def calculate_pair_score(self, student_id1: str, student_id2: str, 
-                             track_preference: str = "none") -> float:
+                           track_preference: str = "none") -> float:
         """
         Calculate a score for a potential student pair. Lower score is better.
         
@@ -126,24 +126,25 @@ class PairingAlgorithm:
         s1 = self.student_lookup[student_id1]
         s2 = self.student_lookup[student_id2]
         
+        # First, check if this would be an interval 1 pairing (absolute prohibition)
+        if self._was_paired_in_last_session(student_id1, student_id2):
+            return float('inf')  # Return infinity to ensure this pair is never selected
+        
         # Initialize score
         score = 0
         
         # 1. Previous pairing penalty (with time decay)
-        # First, check if this would be an interval 1 pairing (absolute prohibition)
-        if self._was_paired_in_last_session(student_id1, student_id2):
-            return float('inf')  # Return infinity to ensure this pair is never selected
-
         pair_key = frozenset([student_id1, student_id2])
+        session_indices = []  # Initialize session_indices here
+        
         if pair_key in self.past_pairings:
-            # Get session index where they were last paired (if tracked)
-            session_indices = []
+            # Get session indices where they were last paired (if tracked)
             for i, session in enumerate(reversed(self.previous_sessions)):
                 for pair in session.get("pairs", []):
                     student_ids = pair.get("student_ids", [])
                     if student_id1 in student_ids and student_id2 in student_ids:
                         session_indices.append(i)
-            
+        
         if session_indices:
             most_recent = min(session_indices)
             # Use a steeper penalty curve - much higher for recent sessions
