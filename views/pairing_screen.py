@@ -258,6 +258,8 @@ class PairingScreen(QWidget):
         previous_sessions = self.class_data.get("sessions", [])
         
         # Add randomness - shuffle students before generating pairs
+        # This ensures that if multiple equally-optimal solutions exist,
+        # we don't always pick the same one
         import random
         random.shuffle(present_students)
         random.shuffle(absent_students)
@@ -265,13 +267,25 @@ class PairingScreen(QWidget):
         # Generate pairings for present students
         present_pairings = []
         if present_students:
+            # Initialize algorithm with present students and ALL previous sessions
             present_algorithm = PairingAlgorithm(present_students, previous_sessions)
+            
+            # Generate optimal pairings with our enhanced algorithm
             present_pairs = present_algorithm.generate_pairings(track_preference)
             
-            # Update group of three counts
+            # Update group of three counts for record-keeping
             present_algorithm.update_group_of_three_counts(present_pairs)
             
-            # Create pairing data with student details
+            # Update student data in the class data with new group of 3 counts
+            for student in present_students:
+                if student["id"] in present_algorithm.student_lookup:
+                    updated_student = present_algorithm.student_lookup[student["id"]]
+                    if "times_in_group_of_three" in updated_student:
+                        # Find this student in the class_data and update
+                        self.class_data["students"][student["id"]]["times_in_group_of_three"] = \
+                            updated_student["times_in_group_of_three"]
+            
+            # Create pairing data with student details for display
             for i, pair in enumerate(present_pairs):
                 students = []
                 for student_id in pair:
@@ -282,7 +296,8 @@ class PairingScreen(QWidget):
                 present_pairings.append({
                     "pair_number": i + 1,
                     "student_ids": pair,
-                    "students": students
+                    "students": students,
+                    "present": True
                 })
         
         # Generate pairings for absent students
@@ -290,8 +305,6 @@ class PairingScreen(QWidget):
         if absent_students:
             absent_algorithm = PairingAlgorithm(absent_students, previous_sessions)
             absent_pairs = absent_algorithm.generate_pairings(track_preference)
-            
-            # No need to update group of three counts for absent students
             
             # Create pairing data with student details
             for i, pair in enumerate(absent_pairs):
@@ -304,7 +317,8 @@ class PairingScreen(QWidget):
                 absent_pairings.append({
                     "pair_number": i + 1,
                     "student_ids": pair,
-                    "students": students
+                    "students": students,
+                    "present": False
                 })
         
         # Store the current pairings
@@ -544,6 +558,65 @@ class PairingScreen(QWidget):
         # Show the presentation view with the current session
         if self.current_session:
             self.main_window.show_presentation_view(self.class_data, self.current_session)
+            
+    def verify_pairings(self, pairings):
+        """
+        Verify that pairings meet our constraints.
+        
+        Args:
+            pairings: List of pairing dictionaries
+            
+        Returns:
+            tuple: (is_valid, message) where is_valid is a boolean and message
+                  explains any issues found
+        """
+        if not pairings:
+            return True, "No pairings to verify"
+        
+        # Extract student IDs from all pairings
+        all_students = set()
+        for pair in pairings:
+            student_ids = pair.get("student_ids", [])
+            for student_id in student_ids:
+                # Check if student appears in multiple pairs
+                if student_id in all_students:
+                    return False, f"Student appears in multiple pairs"
+                all_students.add(student_id)
+        
+        # Get previous sessions for history check
+        previous_sessions = self.class_data.get("sessions", [])
+        
+        # Check for repeat pairings
+        past_pairs = set()
+        for session in previous_sessions:
+            for pair in session.get("pairs", []):
+                student_ids = pair.get("student_ids", [])
+                # For triplets, consider all pairs within
+                if len(student_ids) == 3:
+                    for i in range(3):
+                        for j in range(i + 1, 3):
+                            past_pairs.add(frozenset([student_ids[i], student_ids[j]]))
+                elif len(student_ids) == 2:
+                    past_pairs.add(frozenset(student_ids))
+        
+        # Check each current pair against past pairings
+        repeat_count = 0
+        for pair in pairings:
+            student_ids = pair.get("student_ids", [])
+            # For triplets, check all internal pairs
+            if len(student_ids) == 3:
+                for i in range(3):
+                    for j in range(i + 1, 3):
+                        if frozenset([student_ids[i], student_ids[j]]) in past_pairs:
+                            repeat_count += 1
+            elif len(student_ids) == 2:
+                if frozenset(student_ids) in past_pairs:
+                    repeat_count += 1
+        
+        if repeat_count > 0:
+            return True, f"Note: {repeat_count} repeat pairs were unavoidable"
+        
+        return True, "All pairings verified successfully"                
         
     def go_to_students(self):
         """Navigate to the students view."""

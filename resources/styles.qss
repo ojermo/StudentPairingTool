@@ -146,3 +146,26 @@ QLabel.boldLabel {
 QLabel.descriptionText {
     color: #666666;
 }
+
+/* Message Box styles */
+QMessageBox {
+    background-color: #333333;
+}
+
+QMessageBox QLabel {
+    color: white;
+}
+
+QMessageBox QPushButton {
+    background-color: #da532c;
+    color: white;
+    border: none;
+    padding: 8px 15px;
+    border-radius: 4px;
+    font-weight: bold;
+    min-height: 15px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #bc4626;
+}
