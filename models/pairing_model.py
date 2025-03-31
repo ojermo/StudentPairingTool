@@ -427,11 +427,11 @@ class PairingAlgorithm:
     
     def generate_pairings(self, track_preference: str = "same") -> List[List[str]]:
         """
-        Generate optimal pairings for students.
+        Generate optimal pairings for students using a global optimization approach.
         
         Args:
             track_preference: "same", "different", or "none"
-            
+                
         Returns:
             List of student ID lists (each inner list is a pair or triplet)
         """
@@ -442,8 +442,38 @@ class PairingAlgorithm:
         if len(self.students) == 2:
             return [[self.students[0]["id"], self.students[1]["id"]]]
         
+        # Multiple attempts with different randomization
+        best_pairings = None
+        best_score = float('inf')
+        
+        for attempt in range(5):  # Try 5 different randomizations
+            # Randomize student order for this attempt
+            student_ids = self.student_ids.copy()
+            random.shuffle(student_ids)
+            
+            # Generate pairings with this order
+            pairings = self._generate_pairings_internal(student_ids, track_preference)
+            
+            # Score this solution
+            score = self._score_pairing_solution(pairings, track_preference)
+            
+            # Update if this is better
+            if score < best_score:
+                best_score = score
+                best_pairings = pairings
+        
+        # Always verify and fix at the end
+        if not self._verify_no_forbidden_repeats(best_pairings):
+            best_pairings = self._fix_forbidden_repeats(best_pairings, track_preference)
+        
+        return best_pairings
+
+    def _generate_pairings_internal(self, student_ids, track_preference):
+        """
+        Internal method to generate pairings for a given order of students.
+        """
         pairings = []
-        remaining_students = self.student_ids.copy()
+        remaining_students = student_ids.copy()
         
         # 1. If odd number of students, create a triplet
         if len(remaining_students) % 2 == 1:
@@ -451,7 +481,8 @@ class PairingAlgorithm:
             if triplet:
                 pairings.append(triplet)
                 for student_id in triplet:
-                    remaining_students.remove(student_id)
+                    if student_id in remaining_students:
+                        remaining_students.remove(student_id)
         
         # 2. Pair remaining students optimally
         # Create all possible pairs
@@ -562,11 +593,58 @@ class PairingAlgorithm:
                     if s not in rem_used:
                         pairings.append([s])
         
-        # Verify no interval-1 repeats and fix if needed
-        if not self._verify_no_forbidden_repeats(pairings):
-            pairings = self._fix_forbidden_repeats(pairings, track_preference)
-        
         return pairings
+
+    def _score_pairing_solution(self, pairings, track_preference):
+        """
+        Score a complete pairing solution.
+        Lower scores are better.
+        
+        Args:
+            pairings: List of pairings (each a list of student IDs)
+            track_preference: "same", "different", or "none"
+            
+        Returns:
+            Total score for the solution
+        """
+        total_score = 0
+        
+        # Check for interval-1 repeats (highest priority)
+        if not self._verify_no_forbidden_repeats(pairings):
+            total_score += 1000000  # Very high penalty
+        
+        # Calculate score based on individual pair scores
+        interval_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        
+        for pair in pairings:
+            if len(pair) >= 2:
+                # Score all possible combinations within this pair/triplet
+                for i in range(len(pair)):
+                    for j in range(i+1, len(pair)):
+                        s1, s2 = pair[i], pair[j]
+                        
+                        # Check the interval for this pair
+                        pair_key = frozenset([s1, s2])
+                        if pair_key in self.pairing_intervals:
+                            interval = self.pairing_intervals[pair_key]
+                            if interval < 6:
+                                interval_counts[interval] += 1
+                        
+                        # Add the pair score
+                        score = self.calculate_pair_score(s1, s2, track_preference)
+                        if score == float('inf'):
+                            total_score += 1000000  # Very high penalty
+                        else:
+                            total_score += score
+        
+        # Add penalties for short intervals
+        total_score += interval_counts[0] * 1000000  # interval-1 (last session)
+        total_score += interval_counts[1] * 10000    # interval-2 (two sessions ago)
+        total_score += interval_counts[2] * 1000     # interval-3
+        total_score += interval_counts[3] * 100      # interval-4
+        total_score += interval_counts[4] * 10       # interval-5
+        
+        return total_score
     
     def update_group_of_three_counts(self, pairings: List[List[str]]) -> None:
         """Update the times_in_group_of_three counts based on new pairings."""
