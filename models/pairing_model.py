@@ -130,6 +130,10 @@ class PairingAlgorithm:
         score = 0
         
         # 1. Previous pairing penalty (with time decay)
+        # First, check if this would be an interval 1 pairing (absolute prohibition)
+        if self._was_paired_in_last_session(student_id1, student_id2):
+            return float('inf')  # Return infinity to ensure this pair is never selected
+
         pair_key = frozenset([student_id1, student_id2])
         if pair_key in self.past_pairings:
             # Get session index where they were last paired (if tracked)
@@ -140,15 +144,18 @@ class PairingAlgorithm:
                     if student_id1 in student_ids and student_id2 in student_ids:
                         session_indices.append(i)
             
-            if session_indices:
-                # Most recent session where they were paired (smaller is more recent)
-                most_recent = min(session_indices)
-                # Penalty decreases as sessions pass (exponential decay)
-                recency_penalty = 100 * (0.8 ** most_recent)
-                score += recency_penalty
-            else:
-                # If we know they were paired but can't find when, use moderate penalty
-                score += 50
+        if session_indices:
+            most_recent = min(session_indices)
+            # Use a steeper penalty curve - much higher for recent sessions
+            if most_recent == 0:  # Last session
+                recency_penalty = 500  # Extremely high penalty
+            elif most_recent == 1:  # Two sessions ago
+                recency_penalty = 200  # Very high penalty
+            elif most_recent < 5:  # Recent sessions
+                recency_penalty = 100  # High penalty
+            else:  # Older sessions
+                recency_penalty = 50 * (0.9 ** (most_recent - 5))  # Moderate penalty
+            score += recency_penalty
         
         # 2. Track preference score
         if track_preference == "same":
@@ -302,4 +309,17 @@ class PairingAlgorithm:
                 student_ids = pair.get("student_ids", [])
                 if student_id1 in student_ids and student_id2 in student_ids:
                     return i
-        return -1  # Not found in history                        
+        return -1  # Not found in history   
+
+    def _was_paired_in_last_session(self, student_id1: str, student_id2: str) -> bool:
+        """Check if two students were paired in the most recent session."""
+        if not self.previous_sessions:
+            return False
+            
+        last_session = self.previous_sessions[-1]
+        for pair in last_session.get("pairs", []):
+            student_ids = pair.get("student_ids", [])
+            if student_id1 in student_ids and student_id2 in student_ids:
+                return True
+        
+        return False        
