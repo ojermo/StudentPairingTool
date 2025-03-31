@@ -25,6 +25,7 @@ class PairingAlgorithm:
         
         # Extract past pairings
         self.past_pairings = self._extract_past_pairings()
+        self.last_pairing_session = self._extract_last_pairing_sessions()
         
     def _extract_past_pairings(self) -> Set[frozenset]:
         """Extract all past pairings from previous sessions."""
@@ -44,6 +45,27 @@ class PairingAlgorithm:
                         past_pairs.add(frozenset(student_ids))
         
         return past_pairs
+
+    def _extract_last_pairing_sessions(self) -> dict:
+        """Extract when each pair of students was last paired together."""
+        last_sessions = {}
+        
+        # Go through sessions in reverse order (newest to oldest)
+        for session_idx, session in enumerate(reversed(self.previous_sessions)):
+            for pair in session.get("pairs", []):
+                student_ids = pair.get("student_ids", [])
+                
+                # For each possible pair in this pairing (including pairs within triplets)
+                for i, s1 in enumerate(student_ids):
+                    for j in range(i+1, len(student_ids)):
+                        s2 = student_ids[j]
+                        pair_key = frozenset([s1, s2])
+                        
+                        # Only record the first (most recent) occurrence
+                        if pair_key not in last_sessions:
+                            last_sessions[pair_key] = session_idx
+        
+        return last_sessions
     
     def get_student_previous_pairs(self, student_id: str) -> Set[str]:
         """Get all students that a student has been paired with before."""
@@ -93,20 +115,40 @@ class PairingAlgorithm:
         return best_triplet or []
     
     def calculate_pair_score(self, student_id1: str, student_id2: str, 
-                            track_preference: str = "none") -> float:
+                             track_preference: str = "none") -> float:
         """
         Calculate a score for a potential student pair. Lower score is better.
         
         The score is based on:
-        1. Whether they've been paired before (high penalty)
+        1. How recently they've been paired (higher penalty for more recent pairings)
         2. Track matching according to preference
         """
         s1 = self.student_lookup[student_id1]
         s2 = self.student_lookup[student_id2]
         
-        # 1. Previous pairing penalty (highest factor)
-        if frozenset([student_id1, student_id2]) in self.past_pairings:
-            return float('inf')  # Hard constraint - avoid repeats
+        # Initialize score
+        score = 0
+        
+        # 1. Previous pairing penalty (with time decay)
+        pair_key = frozenset([student_id1, student_id2])
+        if pair_key in self.past_pairings:
+            # Get session index where they were last paired (if tracked)
+            session_indices = []
+            for i, session in enumerate(reversed(self.previous_sessions)):
+                for pair in session.get("pairs", []):
+                    student_ids = pair.get("student_ids", [])
+                    if student_id1 in student_ids and student_id2 in student_ids:
+                        session_indices.append(i)
+            
+            if session_indices:
+                # Most recent session where they were paired (smaller is more recent)
+                most_recent = min(session_indices)
+                # Penalty decreases as sessions pass (exponential decay)
+                recency_penalty = 100 * (0.8 ** most_recent)
+                score += recency_penalty
+            else:
+                # If we know they were paired but can't find when, use moderate penalty
+                score += 50
         
         # 2. Track preference score
         if track_preference == "same":
@@ -118,7 +160,14 @@ class PairingAlgorithm:
         else:  # "none"
             track_score = 0  # No preference
             
-        return track_score
+        score += track_score
+        
+        # 3. Balance groups of three (small penalty)
+        group3_balance = abs(s1.get("times_in_group_of_three", 0) - 
+                             s2.get("times_in_group_of_three", 0))
+        score += group3_balance
+        
+        return score
     
     def generate_pairings(self, track_preference: str = "same") -> List[List[str]]:
         """
@@ -168,84 +217,66 @@ class PairingAlgorithm:
                 used_students.add(s1)
                 used_students.add(s2)
         
-        # 3. Handle any remaining students (unpaired because of repeat constraints)
+        # Handle any remaining students (unpaired because of repeat constraints)
         remaining = [s for s in remaining_students if s not in used_students]
-        
-        # If we have unpaired students, we need to allow some repeats
+
         if remaining:
             # If odd number remaining, create a triplet with the best existing pair
-            if len(remaining) % 2 == 1 and len(pairings) > 0:
-                best_pair = None
-                best_pair_score = float('inf')
-                best_remaining = None
+            if len(remaining) % 2 == 1 and pairings:
+                triplet_scores = []
                 
-                # Find the best pair to convert to a triplet
+                # Score all possible triplets (existing pair + remaining student)
                 for pair in pairings:
                     if len(pair) == 2:  # Only consider pairs, not existing triplets
                         for rem_student in remaining:
-                            # Count repeats
-                            repeat_count = 0
-                            if frozenset([pair[0], rem_student]) in self.past_pairings:
-                                repeat_count += 1
-                            if frozenset([pair[1], rem_student]) in self.past_pairings:
-                                repeat_count += 1
+                            # Calculate aggregate score for this triplet
+                            score1 = self.calculate_pair_score(pair[0], rem_student, track_preference)
+                            score2 = self.calculate_pair_score(pair[1], rem_student, track_preference)
+                            total_score = score1 + score2
                             
-                            # Get group of 3 score
+                            # Track group of 3 balance
                             g3_score = (self.student_lookup[pair[0]].get("times_in_group_of_three", 0) + 
-                                      self.student_lookup[pair[1]].get("times_in_group_of_three", 0) + 
-                                      self.student_lookup[rem_student].get("times_in_group_of_three", 0))
+                                       self.student_lookup[pair[1]].get("times_in_group_of_three", 0) + 
+                                       self.student_lookup[rem_student].get("times_in_group_of_three", 0))
                             
-                            # Total score
-                            total_score = repeat_count * 1000 + g3_score
-                            
-                            if total_score < best_pair_score:
-                                best_pair_score = total_score
-                                best_pair = pair
-                                best_remaining = rem_student
+                            triplet_scores.append((pair, rem_student, total_score, g3_score))
                 
-                if best_pair and best_remaining:
-                    best_pair.append(best_remaining)
-                    remaining.remove(best_remaining)
+                # Sort by score (lower is better)
+                triplet_scores.sort(key=lambda x: (x[2], x[3]))
+                
+                if triplet_scores:
+                    best_pair, best_student, _, _ = triplet_scores[0]
+                    best_pair.append(best_student)
+                    remaining.remove(best_student)
             
-            # Pair any remaining students, allowing repeats as needed
-            while len(remaining) >= 2:
-                # Find the pair with minimal "recency" of pairing
-                best_pair = None
-                lowest_recency = float('inf')
+            # Pair remaining students using the modified score function
+            # This allows for repeat pairings when necessary, but prioritizes
+            # pairs that haven't been paired recently
+            if remaining:
+                remaining_pairs = []
                 
+                # Calculate scores for all possible remaining pairs
                 for i, s1 in enumerate(remaining):
-                    for j, s2 in enumerate(remaining[i+1:]):
-                        s2_idx = i + 1 + j  # Actual index in remaining
-                        
-                        # Check if they've been paired before
-                        for session_idx, session in enumerate(reversed(self.previous_sessions)):
-                            recency = session_idx  # More recent sessions have lower indices
-                            for pair in session.get("pairs", []):
-                                student_ids = pair.get("student_ids", [])
-                                if s1 in student_ids and s2 in student_ids:
-                                    # Found a previous pairing, use recency as score
-                                    if recency < lowest_recency:
-                                        lowest_recency = recency
-                                        best_pair = (s1, s2)
-                        
-                        # If they've never been paired, this is a bug in our algorithm logic
-                        # but we'll handle it anyway
-                        if not best_pair:
-                            best_pair = (s1, s2)
-                            lowest_recency = -1  # Indicate they've never been paired
+                    for j in range(i+1, len(remaining)):
+                        s2 = remaining[j]
+                        score = self.calculate_pair_score(s1, s2, track_preference)
+                        remaining_pairs.append((s1, s2, score))
                 
-                if best_pair:
-                    pairings.append(list(best_pair))
-                    remaining.remove(best_pair[0])
-                    remaining.remove(best_pair[1])
-                else:
-                    # Fallback: just pair the first two students
-                    pairings.append([remaining[0], remaining[1]])
-                    remaining = remaining[2:]
-        
-        # Add any remaining single students (should be none at this point)
-        for student_id in remaining:
-            pairings.append([student_id])
+                # Sort by score (lower is better)
+                remaining_pairs.sort(key=lambda x: x[2])
+                
+                # Create pairs starting with best scores
+                used_remaining = set()
+                for s1, s2, _ in remaining_pairs:
+                    if s1 not in used_remaining and s2 not in used_remaining:
+                        pairings.append([s1, s2])
+                        used_remaining.add(s1)
+                        used_remaining.add(s2)
+                
+                # Handle any stragglers (should be none if even number of students)
+                for s in remaining:
+                    if s not in used_remaining:
+                        pairings.append([s])
         
         return pairings
     
@@ -258,3 +289,17 @@ class PairingAlgorithm:
                     if student_id in self.student_lookup:
                         student = self.student_lookup[student_id]
                         student["times_in_group_of_three"] = student.get("times_in_group_of_three", 0) + 1
+                        
+    def _get_last_pairing_session(self, student_id1: str, student_id2: str) -> int:
+        """
+        Find the most recent session where two students were paired.
+        
+        Returns:
+            Session index (smaller = more recent) or -1 if not found
+        """
+        for i, session in enumerate(reversed(self.previous_sessions)):
+            for pair in session.get("pairs", []):
+                student_ids = pair.get("student_ids", [])
+                if student_id1 in student_ids and student_id2 in student_ids:
+                    return i
+        return -1  # Not found in history                        
