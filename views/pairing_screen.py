@@ -357,11 +357,9 @@ class PairingScreen(QWidget):
             
             # Create table
             present_table = QTableWidget()
-            present_table.setColumnCount(4)
-            present_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Status"])
+            present_table.setColumnCount(3)  # Reduced from 4 to 3
+            present_table.setHorizontalHeaderLabels(["Pair", "Students", "Status"])
             present_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-            present_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-            present_table.setRowCount(len(present_pairings))
             
             # Add pairs to table
             for i, pair in enumerate(present_pairings):
@@ -370,21 +368,16 @@ class PairingScreen(QWidget):
                 pair_item.setTextAlignment(Qt.AlignCenter)
                 present_table.setItem(i, 0, pair_item)
                 
-                # Student names
+                # Student names only (no tracks)
                 student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
                 names_item = QTableWidgetItem(", ".join(student_names))
                 present_table.setItem(i, 1, names_item)
-                
-                # Tracks
-                student_tracks = [s.get("track", "") for s in pair.get("students", [])]
-                tracks_item = QTableWidgetItem(", ".join(student_tracks))
-                present_table.setItem(i, 2, tracks_item)
                 
                 # Status
                 status_item = QTableWidgetItem("Present")
                 status_item.setTextAlignment(Qt.AlignCenter)
                 status_item.setForeground(Qt.darkGreen)
-                present_table.setItem(i, 3, status_item)
+                present_table.setItem(i, 2, status_item)  # Index changed from 3 to 2
             
             self.results_layout.addWidget(present_table)
         else:

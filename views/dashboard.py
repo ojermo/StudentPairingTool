@@ -5,6 +5,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QFont
 
+import json
+import uuid
+import os
 from datetime import datetime
 
 def format_class_display_name(class_data):
@@ -260,19 +263,49 @@ class DashboardView(QWidget):
     
     def export_class(self, class_data):
         """Export a class to a file."""
+        default_filename = f"{class_data['name']}.json"
+        
+        # Initial file selection
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Class",
-            f"{class_data['name']}.json",
+            default_filename,
             "JSON Files (*.json)"
         )
         
         if file_path:
+            # Check if file exists (QFileDialog might have already prompted to replace)
+            if os.path.exists(file_path):
+                # Get directory and filename parts
+                dir_path, filename = os.path.split(file_path)
+                name_part, ext = os.path.splitext(filename)
+                
+                # Find a unique name
+                suffix = 1
+                new_path = os.path.join(dir_path, f"{name_part} ({suffix}){ext}")
+                
+                while os.path.exists(new_path):
+                    suffix += 1
+                    new_path = os.path.join(dir_path, f"{name_part} ({suffix}){ext}")
+                
+                # Ask user if they want to use this non-conflicting name
+                response = QMessageBox.question(
+                    self,
+                    "File Already Exists",
+                    f"A file named '{filename}' already exists. Would you like to save as '{os.path.basename(new_path)}' instead?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes
+                )
+                
+                if response == QMessageBox.Yes:
+                    file_path = new_path
+                # If No, we'll try to overwrite the existing file
+            
             success = self.file_handler.save_class_to_path(class_data, file_path)
             if success:
                 self.main_window.show_message(
                     "Export Successful",
-                    f"Class '{class_data['name']}' was exported successfully."
+                    f"Class '{class_data['name']}' was exported successfully to '{os.path.basename(file_path)}'."
                 )
             else:
                 self.main_window.show_message(
@@ -317,17 +350,69 @@ class DashboardView(QWidget):
                 with open(file_path, 'r', encoding='utf-8') as f:
                     class_data = json.load(f)
                 
-                # Validate class data
-                if "name" not in class_data or "students" not in class_data:
-                    raise ValueError("Invalid class data format")
+                # Basic validation
+                required_fields = ["name", "students"]
+                for field in required_fields:
+                    if field not in class_data:
+                        raise ValueError(f"Invalid class data format: Missing '{field}' field")
+                
+                # Check for duplicate name
+                existing_classes = self.file_handler.get_all_classes()
+                existing_names = [c.get("name") for c in existing_classes]
+                original_name = class_data["name"]
+                
+                # Find a unique name if a duplicate exists
+                if original_name in existing_names:
+                    suffix = 1
+                    new_name = f"{original_name} ({suffix})"
+                    
+                    while new_name in existing_names:
+                        suffix += 1
+                        new_name = f"{original_name} ({suffix})"
+                    
+                    class_data["name"] = new_name
+                    name_changed = True
+                else:
+                    name_changed = False
+                
+                # Check if a class with the same ID already exists
+                existing_ids = [c.get("id") for c in existing_classes]
+                
+                if class_data.get("id") in existing_ids:
+                    # Generate a new ID to avoid conflicts
+                    class_data["id"] = str(uuid.uuid4())
+                    id_changed = True
+                else:
+                    id_changed = False
+                
+                # Add other fields that might be missing with default values
+                if "quarter" not in class_data:
+                    class_data["quarter"] = ""
+                if "tracks" not in class_data:
+                    class_data["tracks"] = []
+                if "sessions" not in class_data:
+                    class_data["sessions"] = []
+                if "creation_date" not in class_data:
+                    class_data["creation_date"] = datetime.now().isoformat()
                 
                 # Save imported class
                 success = self.file_handler.save_class(class_data)
                 
                 if success:
+                    # Create appropriate message based on what changed
+                    if name_changed and id_changed:
+                        message = (f"Class '{original_name}' was imported successfully as '{class_data['name']}' "
+                                  f"with a new ID to avoid conflicts.")
+                    elif name_changed:
+                        message = f"Class '{original_name}' was imported successfully as '{class_data['name']}' to avoid name conflict."
+                    elif id_changed:
+                        message = f"Class '{class_data['name']}' was imported successfully with a new ID to avoid conflicts."
+                    else:
+                        message = f"Class '{class_data['name']}' was imported successfully."
+                    
                     self.main_window.show_message(
                         "Import Successful",
-                        f"Class '{class_data['name']}' was imported successfully."
+                        message
                     )
                     self.refresh_classes()
                 else:
@@ -337,6 +422,12 @@ class DashboardView(QWidget):
                         icon=QMessageBox.Warning
                     )
             
+            except json.JSONDecodeError:
+                self.main_window.show_message(
+                    "Invalid JSON",
+                    "The selected file is not a valid JSON file.",
+                    icon=QMessageBox.Warning
+                )
             except Exception as e:
                 self.main_window.show_message(
                     "Import Failed",

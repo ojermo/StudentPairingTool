@@ -2,11 +2,13 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFrame, QTableWidget, QTableWidgetItem, QHeaderView
+    QComboBox, QFrame, QTableWidget, QTableWidgetItem, QHeaderView,
+    QFileDialog, QMessageBox, QProgressBar
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from utils.ui_helpers import setup_navigation_bar
 from datetime import datetime
+import os
 
 class HistoryView(QWidget):
     """View for viewing pairing history."""
@@ -17,6 +19,13 @@ class HistoryView(QWidget):
         self.file_handler = main_window.file_handler
         self.class_data = None
         self.current_session = None
+        
+        # Check if pandas is available for Excel export
+        try:
+            import pandas as pd
+            self.pandas_available = True
+        except ImportError:
+            self.pandas_available = False
         
         self.setup_ui()
     
@@ -60,20 +69,38 @@ class HistoryView(QWidget):
         
         # History table
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(4)
-        self.history_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Status"])
+        self.history_table.setColumnCount(3)  # Reduced from 4 to 3
+        self.history_table.setHorizontalHeaderLabels(["Pair", "Students", "Status"])
         self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         
         content_layout.addWidget(self.history_table)
+        
+        # Progress bar (hidden initially)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        content_layout.addWidget(self.progress_bar)
         
         # Bottom actions
         actions_layout = QHBoxLayout()
         
-        export_session_button = QPushButton("Export Session")
-        export_session_button.setObjectName("secondary")
-        export_session_button.clicked.connect(self.export_session)
-        actions_layout.addWidget(export_session_button)
+        # Export options
+        export_label = QLabel("Export as:")
+        actions_layout.addWidget(export_label)
+        
+        export_csv_button = QPushButton("CSV")
+        export_csv_button.setObjectName("secondary")
+        export_csv_button.clicked.connect(self.export_session_csv)
+        actions_layout.addWidget(export_csv_button)
+        
+        export_excel_button = QPushButton("Excel")
+        export_excel_button.setObjectName("secondary")
+        export_excel_button.clicked.connect(self.export_session_excel)
+        if not self.pandas_available:
+            export_excel_button.setEnabled(False)
+            export_excel_button.setToolTip("Requires pandas and openpyxl packages")
+        actions_layout.addWidget(export_excel_button)
         
         actions_layout.addStretch()
         
@@ -175,15 +202,6 @@ class HistoryView(QWidget):
             names_item = QTableWidgetItem(", ".join(student_names))
             self.history_table.setItem(i, 1, names_item)
             
-            # Tracks
-            student_tracks = []
-            for student_id in student_ids:
-                if student_id in students:
-                    student_tracks.append(students[student_id].get("track", ""))
-            
-            tracks_item = QTableWidgetItem(", ".join(student_tracks))
-            self.history_table.setItem(i, 2, tracks_item)
-            
             # Status (present/absent)
             status_text = "Present" if is_present else "Absent"
             status_item = QTableWidgetItem(status_text)
@@ -195,9 +213,9 @@ class HistoryView(QWidget):
             else:
                 status_item.setForeground(Qt.darkRed)
             
-            self.history_table.setItem(i, 3, status_item)
+            self.history_table.setItem(i, 2, status_item)  # Index changed from 3 to 2
     
-    def export_session(self):
+    def export_session_csv(self):
         """Export the current session to CSV."""
         if not self.current_session:
             self.main_window.show_message(
@@ -207,67 +225,147 @@ class HistoryView(QWidget):
             )
             return
         
+        # Get session date for filename
+        session_date = ""
+        try:
+            date_str = self.current_session.get("date", "")
+            date_obj = datetime.fromisoformat(date_str)
+            session_date = date_obj.strftime("%Y%m%d")
+        except:
+            session_date = "session"
+        
         # Get file path
-        file_path, _ = self.main_window.get_save_file_path(
-            "Export Session",
-            f"session_{self.current_session.get('id', '')}.csv",
+        default_filename = f"{self.class_data['name']}_{session_date}.csv"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Session as CSV",
+            default_filename,
             "CSV Files (*.csv)"
         )
         
         if not file_path:
             return
         
-        try:
-            import csv
-            
-            with open(file_path, 'w', newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                
-                # Write header
-                writer.writerow(["Pair", "Students", "Tracks", "Status"])
-                
-                # Get student lookup
-                students = self.class_data.get("students", {})
-                
-                # Write rows
-                for i, pair in enumerate(self.current_session.get("pairs", [])):
-                    student_ids = pair.get("student_ids", [])
-                    is_present = pair.get("present", True)
-                    
-                    # Student names
-                    student_names = []
-                    for student_id in student_ids:
-                        if student_id in students:
-                            student_names.append(students[student_id].get("name", "Unknown"))
-                        else:
-                            student_names.append("Unknown Student")
-                    
-                    # Tracks
-                    student_tracks = []
-                    for student_id in student_ids:
-                        if student_id in students:
-                            student_tracks.append(students[student_id].get("track", ""))
-                    
-                    # Status
-                    status = "Present" if is_present else "Absent"
-                    
-                    writer.writerow([
-                        i + 1,
-                        ", ".join(student_names),
-                        ", ".join(student_tracks),
-                        status
-                    ])
-            
+        # Check for file extension
+        if not file_path.lower().endswith('.csv'):
+            file_path += '.csv'
+        
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(10)
+        
+        # Give UI time to update
+        QTimer.singleShot(50, lambda: self.perform_csv_export(file_path))
+    
+    def perform_csv_export(self, file_path):
+        """Actually perform the CSV export."""
+        self.progress_bar.setValue(30)
+        
+        # Export the session data
+        success = self.file_handler.export_session_to_csv(
+            self.class_data, self.current_session, file_path
+        )
+        
+        self.progress_bar.setValue(100)
+        
+        # Hide progress bar
+        QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
+        
+        if success:
             self.main_window.show_message(
                 "Export Successful",
-                f"Session data has been exported to {file_path}",
-                QMessageBox.Information
+                f"Session data was exported successfully to\n{os.path.basename(file_path)}",
+                icon=QMessageBox.Information
             )
-        except Exception as e:
+        else:
             self.main_window.show_message(
                 "Export Failed",
-                f"Failed to export session: {str(e)}",
+                "Failed to export session data. Please try again.",
+                icon=QMessageBox.Warning
+            )
+    
+    def export_session_excel(self):
+        """Export the current session to Excel."""
+        if not self.current_session:
+            self.main_window.show_message(
+                "No Session Selected",
+                "Please select a session to export.",
                 QMessageBox.Warning
+            )
+            return
+        
+        if not self.pandas_available:
+            self.main_window.show_message(
+                "Missing Dependencies",
+                "Excel export requires the pandas and openpyxl packages.\n\n"
+                "Please install them with:\npip install pandas openpyxl xlsxwriter",
+                icon=QMessageBox.Warning
+            )
+            return
+        
+        # Get session date for filename
+        session_date = ""
+        try:
+            date_str = self.current_session.get("date", "")
+            date_obj = datetime.fromisoformat(date_str)
+            session_date = date_obj.strftime("%Y%m%d")
+        except:
+            session_date = "session"
+        
+        # Get file path
+        default_filename = f"{self.class_data['name']}_{session_date}.xlsx"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Session as Excel",
+            default_filename,
+            "Excel Files (*.xlsx)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Check for file extension
+        if not file_path.lower().endswith('.xlsx'):
+            file_path += '.xlsx'
+        
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(10)
+        
+        # Give UI time to update
+        QTimer.singleShot(50, lambda: self.perform_excel_export(file_path))
+    
+    def perform_excel_export(self, file_path):
+        """Actually perform the Excel export."""
+        self.progress_bar.setValue(30)
+        
+        # Export the session data
+        try:
+            success = self.file_handler.export_session_to_excel(
+                self.class_data, self.current_session, file_path
+            )
+        except Exception as e:
+            success = False
+            print(f"Excel export error: {e}")
+        
+        self.progress_bar.setValue(100)
+        
+        # Hide progress bar
+        QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
+        
+        if success:
+            self.main_window.show_message(
+                "Export Successful",
+                f"Session data was exported successfully to\n{os.path.basename(file_path)}",
+                icon=QMessageBox.Information
+            )
+        else:
+            self.main_window.show_message(
+                "Export Failed",
+                "Failed to export session data. Please try again.",
+                icon=QMessageBox.Warning
             )
     
     def present_session(self):

@@ -40,11 +40,10 @@ class PairDisplay(QFrame):
                 student_label.setMinimumHeight(50)  # Set minimum height for wrapped text
                 layout.addWidget(student_label)
         else:
-            # Display student info from the list
+            # Display student info from the list (name only, no track)
             for student in students_list:
                 student_name = student.get("name", "Unknown Student")
-                student_track = student.get("track", "")
-                student_label = QLabel(f"{student_name} ({student_track})")
+                student_label = QLabel(student_name)
                 student_label.setStyleSheet("font-size: 16px; padding: 5px;")
                 student_label.setAlignment(Qt.AlignCenter)
                 student_label.setWordWrap(True)  # Allow text wrapping
