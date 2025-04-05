@@ -3,7 +3,8 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QFrame, QScrollArea, QMessageBox, QGridLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QAbstractSpinBox
+    QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, 
+    QAbstractSpinBox, QSplitter, QSizePolicy
 )
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor
@@ -349,17 +350,32 @@ class PairingScreen(QWidget):
         # Clear previous results
         self.clear_results()
         
-        # Create table for present students
+        # Create a splitter to hold both tables
+        splitter = QSplitter(Qt.Vertical)  # Vertical orientation for top/bottom split
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Make splitter expand in both directions
+        
+        # Create container widgets for each section
+        present_container = QWidget()
+        present_layout = QVBoxLayout(present_container)
+        present_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins to maximize space
+        
+        absent_container = QWidget()
+        absent_layout = QVBoxLayout(absent_container)
+        absent_layout.setContentsMargins(0, 0, 0, 0)  # Remove margins to maximize space
+        
+        # Present students section
         if present_pairings:
             present_header = QLabel("Present Students")
             present_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
-            self.results_layout.addWidget(present_header)
+            present_layout.addWidget(present_header)
             
             # Create table
             present_table = QTableWidget()
-            present_table.setColumnCount(3)  # Reduced from 4 to 3
+            present_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Make table expand
+            present_table.setColumnCount(3)
             present_table.setHorizontalHeaderLabels(["Pair", "Students", "Status"])
             present_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            present_table.setRowCount(len(present_pairings))
             
             # Add pairs to table
             for i, pair in enumerate(present_pairings):
@@ -377,26 +393,25 @@ class PairingScreen(QWidget):
                 status_item = QTableWidgetItem("Present")
                 status_item.setTextAlignment(Qt.AlignCenter)
                 status_item.setForeground(Qt.darkGreen)
-                present_table.setItem(i, 2, status_item)  # Index changed from 3 to 2
+                present_table.setItem(i, 2, status_item)
             
-            self.results_layout.addWidget(present_table)
+            present_layout.addWidget(present_table)
         else:
             # No present students message
             no_present = QLabel("No present students to pair")
             no_present.setAlignment(Qt.AlignCenter)
             no_present.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
-            self.results_layout.addWidget(no_present)
+            present_layout.addWidget(no_present)
         
-        # Absent students table
+        # Absent students section
         if absent_pairings:
-            self.results_layout.addSpacing(20)
-            
             absent_header = QLabel("Absent Students")
             absent_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #666666;")
-            self.results_layout.addWidget(absent_header)
+            absent_layout.addWidget(absent_header)
             
             # Create table
             absent_table = QTableWidget()
+            absent_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Make table expand
             absent_table.setColumnCount(4)
             absent_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Status"])
             absent_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -426,17 +441,28 @@ class PairingScreen(QWidget):
                 status_item.setForeground(Qt.darkRed)
                 absent_table.setItem(i, 3, status_item)
             
-            self.results_layout.addWidget(absent_table)
+            absent_layout.addWidget(absent_table)
         else:
             # No absent students message
             if present_pairings:  # Only show if there are present students
                 no_absent = QLabel("No absent students")
                 no_absent.setAlignment(Qt.AlignCenter)
                 no_absent.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
-                self.results_layout.addWidget(no_absent)
+                absent_layout.addWidget(no_absent)
         
-        # Add stretch to push everything to the top
-        self.results_layout.addStretch()
+        # Add containers to splitter
+        splitter.addWidget(present_container)
+        splitter.addWidget(absent_container)
+        
+        # Set initial sizes - 70% for present, 30% for absent
+        if present_pairings and absent_pairings:
+            splitter.setSizes([70, 30])
+        
+        # Add splitter to the main layout
+        self.results_layout.addWidget(splitter)
+        
+        # Don't add stretch at the end - this was pushing everything to the top
+        # self.results_layout.addStretch()  # Remove this line
     
     def save_pairings(self):
         """Save the current pairings to history."""
