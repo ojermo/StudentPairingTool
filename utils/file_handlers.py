@@ -469,7 +469,7 @@ class FileHandler:
             print(f"Error exporting class to Excel: {e}")
             return False
     
-    def export_session_to_excel(self, class_data: Dict, session_data: Dict, output_path: str) -> bool:
+    def export_session_to_excel(self, class_data: Dict, session_data: Dict, output_path: str, for_editing: bool = False) -> bool:
         """
         Export a single session to Excel with formatting.
         
@@ -477,6 +477,7 @@ class FileHandler:
             class_data: Dictionary representation of a class
             session_data: Dictionary representation of a session
             output_path: Path to save the Excel file
+            for_editing: Whether this export is intended for editing and re-import
             
         Returns:
             True if successful, False otherwise
@@ -487,6 +488,9 @@ class FileHandler:
             return False
         
         try:
+            import uuid  # Add this line to import uuid
+            from datetime import datetime  # Make sure datetime is also imported
+            
             # Create Excel writer
             with pd.ExcelWriter(
                 output_path, 
@@ -541,6 +545,7 @@ class FileHandler:
                 pairs = session_data.get("pairs", [])
                 
                 if pairs:
+                    # For standard display format:
                     pairs_data = []
                     
                     for i, pair in enumerate(pairs):
@@ -561,6 +566,7 @@ class FileHandler:
                             if student_id in students:
                                 student_tracks.append(students[student_id].get("track", ""))
                         
+                        # Standard display format
                         pairs_data.append({
                             "Pair #": i + 1,
                             "Students": ", ".join(student_names),
@@ -569,7 +575,85 @@ class FileHandler:
                             "Status": "Present" if is_present else "Absent"
                         })
                     
-                    # Create DataFrame and export to Excel
+                    # If this is for editing, add an editable format sheet
+                    if for_editing:
+                        # Create an "Editable" sheet with more detailed data structure
+                        edit_data = []
+                        
+                        for i, pair in enumerate(pairs):
+                            pair_id = pair.get("id", str(uuid.uuid4()))  # Generate ID if not present
+                            student_ids = pair.get("student_ids", [])
+                            is_present = pair.get("present", True)
+                            
+                            # Add each student in the pair as a separate row
+                            for student_id in student_ids:
+                                student_name = "Unknown"
+                                student_track = ""
+                                
+                                if student_id in students:
+                                    student = students[student_id]
+                                    student_name = student.get("name", "Unknown")
+                                    student_track = student.get("track", "")
+                                
+                                edit_data.append({
+                                    "Pair ID": pair_id,
+                                    "Pair #": i + 1,
+                                    "Student ID": student_id,
+                                    "Student Name": student_name,
+                                    "Track": student_track,
+                                    "Present": is_present
+                                })
+                        
+                        # Save editable format to a separate sheet
+                        edit_df = pd.DataFrame(edit_data)
+                        edit_df.to_excel(writer, sheet_name="Editable Format", index=False)
+                        
+                        # Format the editable sheet
+                        edit_worksheet = writer.sheets["Editable Format"]
+                        
+                        # Apply header format
+                        for col_num, value in enumerate(edit_df.columns.values):
+                            edit_worksheet.write(0, col_num, value, header_format)
+                        
+                        # Add instructions
+                        edit_worksheet.merge_range(len(edit_data) + 2, 0, len(edit_data) + 2, 5, 
+                                                 "EDITING INSTRUCTIONS", header_format)
+                        edit_worksheet.merge_range(len(edit_data) + 3, 0, len(edit_data) + 3, 5,
+                                                 "1. Do not change Pair ID or Student ID values unless you know what you're doing")
+                        edit_worksheet.merge_range(len(edit_data) + 4, 0, len(edit_data) + 4, 5,
+                                                 "2. To move students between pairs, change their Pair ID and Pair # values")
+                        edit_worksheet.merge_range(len(edit_data) + 5, 0, len(edit_data) + 5, 5,
+                                                 "3. To mark students absent, change Present to FALSE (must be all caps)")
+                    
+                    # Add metadata sheet for roundtrip support
+                    metadata = {
+                        "Property": [
+                            "File Version", 
+                            "Export Type", 
+                            "Class ID", 
+                            "Session ID", 
+                            "Export Date"
+                        ],
+                        "Value": [
+                            "1.0",
+                            "StudentPairingTool_Session",
+                            class_data.get("id", ""),
+                            session_data.get("id", ""),
+                            datetime.now().isoformat()
+                        ]
+                    }
+                    
+                    metadata_df = pd.DataFrame(metadata)
+                    metadata_df.to_excel(writer, sheet_name="_Metadata", index=False)
+                    
+                    # Try to hide the metadata sheet (might not work in all Excel versions)
+                    try:
+                        metadata_worksheet = writer.sheets["_Metadata"]
+                        metadata_worksheet.hide()
+                    except:
+                        pass
+                    
+                    # Create DataFrame and export to Excel for display
                     pairs_df = pd.DataFrame(pairs_data)
                     pairs_df.to_excel(writer, sheet_name="Pairs", index=False)
                     
@@ -663,10 +747,441 @@ class FileHandler:
                         )
                         worksheet.set_column(i, i, column_width + 2)
                 
-            return True
+                return True
         except Exception as e:
             print(f"Error exporting session to Excel: {e}")
             return False
+
+    def import_pairings_from_excel(self, class_data: Dict, file_path: str) -> Optional[Dict]:
+        """
+        Import pairing data from an Excel file with roundtrip support.
+        
+        Args:
+            class_data: Dictionary containing class information
+            file_path: Path to the Excel file
+            
+        Returns:
+            Dictionary representation of a session or None if import failed
+        """
+        if not PANDAS_AVAILABLE:
+            print("Error: pandas is required for Excel import")
+            return None
+        
+        try:
+            import pandas as pd
+            import uuid
+            from datetime import datetime
+            
+            # Check if this is a file we exported
+            is_our_export = False
+            session_id = None
+            class_id = None
+            
+            try:
+                # Try to read metadata sheet
+                metadata_df = pd.read_excel(file_path, sheet_name="_Metadata")
+                
+                # Look for session date in metadata
+                session_date_row = metadata_df[metadata_df["Property"] == "Session Date"]
+                if not session_date_row.empty:
+                    session_date = session_date_row.iloc[0]["Value"]
+                    # Save this to use later when creating the session object
+
+                # Look for our export type marker
+                if not metadata_df.empty:
+                    
+                    # Check if this is a property/value format
+                    if "Property" in metadata_df.columns and "Value" in metadata_df.columns:
+                        export_type_row = metadata_df[metadata_df["Property"] == "Export Type"]
+                        class_id_row = metadata_df[metadata_df["Property"] == "Class ID"]
+                        session_id_row = metadata_df[metadata_df["Property"] == "Session ID"]
+                        
+                        if not export_type_row.empty and export_type_row.iloc[0]["Value"] == "StudentPairingTool_Session":
+                            is_our_export = True
+                            
+                            if not session_id_row.empty:
+                                session_id = session_id_row.iloc[0]["Value"]
+                            
+                            if not class_id_row.empty:
+                                class_id = class_id_row.iloc[0]["Value"]
+                    
+                    # Check if it's a single row metadata format
+                    elif "Export Type" in metadata_df.columns:
+                        if metadata_df.iloc[0]["Export Type"] == "StudentPairingTool_Session":
+                            is_our_export = True
+                            
+                            if "Session ID" in metadata_df.columns:
+                                session_id = metadata_df.iloc[0]["Session ID"]
+                            
+                            if "Class ID" in metadata_df.columns:
+                                class_id = metadata_df.iloc[0]["Class ID"]
+            except:
+                # No metadata sheet, not our export
+                pass
+            
+            # Check if the class ID matches (if available)
+            if is_our_export and class_id and class_id != class_data.get("id"):
+                print("Warning: The Excel file was exported from a different class")
+            
+            # Try to read the editable format sheet first (for our exports)
+            try:
+                if is_our_export:
+                    edit_df = pd.read_excel(file_path, sheet_name="Editable Format")
+                    if not edit_df.empty:
+                        return self._process_editable_sheet(edit_df, class_data, session_id)
+            except:
+                # No editable sheet or error reading it
+                pass
+            
+            # Fall back to reading the regular Pairs sheet
+            try:
+                pairs_df = pd.read_excel(file_path, sheet_name="Pairs")
+                if not pairs_df.empty:
+                    return self._process_pairs_sheet(pairs_df, class_data, session_id)
+            except:
+                # Try to find any sheet that might contain pairing data
+                pass
+            
+            # Last resort: try to find any sheet with student data
+            sheets = pd.ExcelFile(file_path).sheet_names
+            for sheet in sheets:
+                if sheet not in ["_Metadata", "Session Info", "Attendance"]:
+                    try:
+                        df = pd.read_excel(file_path, sheet_name=sheet)
+                        if not df.empty:
+                            # Check if this looks like a pairing sheet
+                            if any(col in df.columns for col in ["Pair", "Student", "Students", "Pair #"]):
+                                return self._process_generic_sheet(df, class_data, session_id)
+                    except:
+                        continue
+            
+            # No valid data found
+            return None
+        
+        except Exception as e:
+            print(f"Error importing from Excel: {e}")
+            return None
+
+    def _process_editable_sheet(self, df, class_data, session_id=None):
+        """Process data from our editable format sheet."""
+        try:
+            import uuid
+            from datetime import datetime
+            
+            # Create a new session ID if none provided
+            if not session_id:
+                session_id = str(uuid.uuid4())
+
+    original_date = None
+    if session_id:
+        for session in class_data.get("sessions", []):
+            if session.get("id") == session_id:
+                original_date = session.get("date")
+                break
+    
+            # Initialize session data with original date if available
+            session_data = {
+                "id": session_id,
+                "date": original_date if original_date else datetime.now().isoformat(),
+                "track_preference": "none",
+                "present_student_ids": [],
+                "absent_student_ids": [],
+                "pairs": []
+            }
+            
+            # Group by Pair ID
+            if "Pair ID" in df.columns:
+                pair_groups = df.groupby("Pair ID")
+            else:
+                # If no Pair ID, try Pair #
+                pair_groups = df.groupby("Pair #")
+            
+            # Student lookups
+            students_dict = class_data.get("students", {})
+            student_name_lookup = {s.get("name", "").lower(): s for s in students_dict.values()}
+            
+            # Process each pair
+            present_ids = []
+            absent_ids = []
+            
+            for pair_id, group in pair_groups:
+                # Get student IDs from this pair
+                student_ids = []
+                is_present = True  # Default to present
+                
+                for _, row in group.iterrows():
+                    student_id = None
+                    
+                    # Get student ID from row
+                    if "Student ID" in row and pd.notna(row["Student ID"]):
+                        student_id = str(row["Student ID"]).strip()
+                    
+                    # If no valid ID, try to match by name
+                    if (not student_id or student_id not in students_dict) and "Student Name" in row:
+                        student_name = str(row["Student Name"]).strip().lower()
+                        if student_name in student_name_lookup:
+                            student_id = student_name_lookup[student_name]["id"]
+                    
+                    # Only add if we found a valid student
+                    if student_id and student_id in students_dict:
+                        student_ids.append(student_id)
+                    
+                    # Check present status (use the last row's value for the whole pair)
+                    if "Present" in row:
+                        try:
+                            # Handle different possible formats (True/False, YES/NO, etc.)
+                            present_val = row["Present"]
+                            if isinstance(present_val, bool):
+                                is_present = present_val
+                            elif isinstance(present_val, str):
+                                is_present = present_val.lower() not in ["false", "no", "0", "n"]
+                            elif isinstance(present_val, (int, float)):
+                                is_present = bool(present_val)
+                            else:
+                                is_present = True
+                        except:
+                            is_present = True
+                
+                # Only add if we have at least one valid student ID
+                if student_ids:
+                    # Create pair data
+                    pair_data = {
+                        "student_ids": student_ids,
+                        "present": is_present
+                    }
+                    
+                    session_data["pairs"].append(pair_data)
+                    
+                    # Track present/absent
+                    if is_present:
+                        present_ids.extend(student_ids)
+                    else:
+                        absent_ids.extend(student_ids)
+            
+            # Update present/absent lists (remove duplicates)
+            session_data["present_student_ids"] = list(set(present_ids))
+            session_data["absent_student_ids"] = list(set(absent_ids))
+            
+            # Only return if we found valid pairs
+            if session_data["pairs"]:
+                return session_data
+            
+            return None
+        except Exception as e:
+            print(f"Error processing editable sheet: {e}")
+            return None
+
+    def _process_pairs_sheet(self, df, class_data, session_id=None):
+        """Process data from our standard pairs sheet."""
+        try:
+            import uuid
+            from datetime import datetime
+            
+            # Create a new session ID if none provided
+            if not session_id:
+                session_id = str(uuid.uuid4())
+            
+            # Initialize session data
+            session_data = {
+                "id": session_id,
+                "date": datetime.now().isoformat(),
+                "track_preference": "none",
+                "present_student_ids": [],
+                "absent_student_ids": [],
+                "pairs": []
+            }
+            
+            # Check for the required columns
+            if "Students" not in df.columns:
+                # Not our standard format
+                return self._process_generic_sheet(df, class_data, session_id)
+            
+            # Student lookups
+            students_dict = class_data.get("students", {})
+            student_name_lookup = {s.get("name", "").lower(): s for s in students_dict.values()}
+            
+            # Present/absent IDs
+            present_ids = []
+            absent_ids = []
+            
+            # Process each row (each row is a pair)
+            for _, row in df.iterrows():
+                is_present = row.get("Status", "Present") == "Present"
+                
+                # Split student names from the comma-separated list
+                student_list = []
+                
+                if pd.notna(row["Students"]):
+                    student_names = [name.strip() for name in row["Students"].split(",")]
+                    
+                    # Try to match each student name to a student ID
+                    student_ids = []
+                    for name in student_names:
+                        if name.lower() in student_name_lookup:
+                            student_ids.append(student_name_lookup[name.lower()]["id"])
+                    
+                    if student_ids:
+                        # Create pair data
+                        pair_data = {
+                            "student_ids": student_ids,
+                            "present": is_present
+                        }
+                        
+                        session_data["pairs"].append(pair_data)
+                        
+                        # Track present/absent
+                        if is_present:
+                            present_ids.extend(student_ids)
+                        else:
+                            absent_ids.extend(student_ids)
+            
+            # Update present/absent lists (remove duplicates)
+            session_data["present_student_ids"] = list(set(present_ids))
+            session_data["absent_student_ids"] = list(set(absent_ids))
+            
+            # Only return if we found valid pairs
+            if session_data["pairs"]:
+                return session_data
+            
+            return None
+        except Exception as e:
+            print(f"Error processing pairs sheet: {e}")
+            return None
+
+    def _process_generic_sheet(self, df, class_data, session_id=None):
+        """Attempt to process a generic sheet with pairing data."""
+        try:
+            import uuid
+            from datetime import datetime
+            
+            # Create a new session ID if none provided
+            if not session_id:
+                session_id = str(uuid.uuid4())
+            
+            # Initialize session data
+            session_data = {
+                "id": session_id,
+                "date": datetime.now().isoformat(),
+                "track_preference": "none",
+                "present_student_ids": [],
+                "absent_student_ids": [],
+                "pairs": []
+            }
+            
+            # Student lookups
+            students_dict = class_data.get("students", {})
+            student_name_lookup = {s.get("name", "").lower(): s for s in students_dict.values()}
+            
+            # Try to identify the structure
+            # Check if columns have student names (common pattern)
+            student_columns = []
+            for col in df.columns:
+                col_str = str(col).lower()
+                if "student" in col_str or "name" in col_str:
+                    student_columns.append(col)
+            
+            # Present/absent IDs
+            present_ids = []
+            absent_ids = []
+            
+            # If we have columns that look like student entries
+            if student_columns:
+                # Try to extract pairs
+                pair_column = None
+                for col in df.columns:
+                    col_str = str(col).lower()
+                    if "pair" in col_str or "group" in col_str:
+                        pair_column = col
+                        break
+                
+                if pair_column:
+                    # Group by pair
+                    for pair_id, group in df.groupby(pair_column):
+                        student_ids = []
+                        is_present = True  # Default to present
+                        
+                        # Process student columns for this pair
+                        for _, row in group.iterrows():
+                            for col in student_columns:
+                                if pd.notna(row[col]):
+                                    student_name = str(row[col]).strip().lower()
+                                    
+                                    if student_name in student_name_lookup:
+                                        student_ids.append(student_name_lookup[student_name]["id"])
+                            
+                            # Check for status column
+                            status_col = next((c for c in df.columns if "status" in str(c).lower() or 
+                                             "present" in str(c).lower() or 
+                                             "absent" in str(c).lower()), None)
+                            
+                            if status_col and pd.notna(row[status_col]):
+                                status_val = str(row[status_col]).lower()
+                                is_present = "absent" not in status_val and "no" not in status_val
+                        
+                        # Add pair if we found valid students
+                        if student_ids:
+                            pair_data = {
+                                "student_ids": student_ids,
+                                "present": is_present
+                            }
+                            
+                            session_data["pairs"].append(pair_data)
+                            
+                            # Track present/absent
+                            if is_present:
+                                present_ids.extend(student_ids)
+                            else:
+                                absent_ids.extend(student_ids)
+                else:
+                    # No pair column, assume each row is a complete pair
+                    for _, row in df.iterrows():
+                        student_ids = []
+                        is_present = True  # Default to present
+                        
+                        # Process all student columns in this row
+                        for col in student_columns:
+                            if pd.notna(row[col]):
+                                student_name = str(row[col]).strip().lower()
+                                
+                                if student_name in student_name_lookup:
+                                    student_ids.append(student_name_lookup[student_name]["id"])
+                        
+                        # Check for status column
+                        status_col = next((c for c in df.columns if "status" in str(c).lower() or 
+                                         "present" in str(c).lower() or 
+                                         "absent" in str(c).lower()), None)
+                        
+                        if status_col and pd.notna(row[status_col]):
+                            status_val = str(row[status_col]).lower()
+                            is_present = "absent" not in status_val and "no" not in status_val
+                        
+                        # Add pair if we found valid students
+                        if len(student_ids) > 1:  # Need at least 2 students for a pair
+                            pair_data = {
+                                "student_ids": student_ids,
+                                "present": is_present
+                            }
+                            
+                            session_data["pairs"].append(pair_data)
+                            
+                            # Track present/absent
+                            if is_present:
+                                present_ids.extend(student_ids)
+                            else:
+                                absent_ids.extend(student_ids)
+            
+            # Update present/absent lists (remove duplicates)
+            session_data["present_student_ids"] = list(set(present_ids))
+            session_data["absent_student_ids"] = list(set(absent_ids))
+            
+            # Only return if we found valid pairs
+            if session_data["pairs"]:
+                return session_data
+            
+            return None
+        except Exception as e:
+            print(f"Error processing generic sheet: {e}")
+            return None
     
     def backup_all_data(self, backup_path: str) -> bool:
         """

@@ -330,21 +330,32 @@ class HistoryView(QWidget):
         if not file_path.lower().endswith('.xlsx'):
             file_path += '.xlsx'
         
+        # Ask if this is for editing
+        response = QMessageBox.question(
+            self,
+            "Export for Editing",
+            "Do you want to include editing format in the export?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes
+        )
+        
+        for_editing = response == QMessageBox.Yes
+        
         # Show progress
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(10)
         
         # Give UI time to update
-        QTimer.singleShot(50, lambda: self.perform_excel_export(file_path))
-    
-    def perform_excel_export(self, file_path):
+        QTimer.singleShot(50, lambda: self.perform_excel_export(file_path, for_editing))
+
+    def perform_excel_export(self, file_path, for_editing=False):
         """Actually perform the Excel export."""
         self.progress_bar.setValue(30)
         
         # Export the session data
         try:
             success = self.file_handler.export_session_to_excel(
-                self.class_data, self.current_session, file_path
+                self.class_data, self.current_session, file_path, for_editing
             )
         except Exception as e:
             success = False
@@ -356,9 +367,10 @@ class HistoryView(QWidget):
         QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
         
         if success:
+            edit_msg = " with editing format" if for_editing else ""
             self.main_window.show_message(
                 "Export Successful",
-                f"Session data was exported successfully to\n{os.path.basename(file_path)}",
+                f"Session data was exported successfully{edit_msg} to\n{os.path.basename(file_path)}",
                 icon=QMessageBox.Information
             )
         else:

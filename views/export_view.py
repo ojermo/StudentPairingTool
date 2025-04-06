@@ -50,6 +50,28 @@ class ExportView(QWidget):
         export_desc = QLabel("Select the format and options for exporting your class data.")
         export_desc.setStyleSheet("color: #666666; margin-bottom: 10px;")
         content_layout.addWidget(export_desc)
+
+        # Import section
+        import_group = QGroupBox("Import Data")
+        import_layout = QVBoxLayout(import_group)
+
+        import_desc = QLabel("Import data from external files into your class.")
+        import_desc.setStyleSheet("color: #666666; margin-bottom: 10px;")
+        import_layout.addWidget(import_desc)
+
+        # Create buttons for different import types
+        import_students_button = QPushButton("Import Students from CSV/Excel")
+        import_students_button.setObjectName("secondary")
+        import_students_button.clicked.connect(self.import_students)
+        import_layout.addWidget(import_students_button)
+
+        import_pairings_button = QPushButton("Import Pairings from Excel")
+        import_pairings_button.setObjectName("secondary")
+        import_pairings_button.clicked.connect(self.import_pairings)
+        import_layout.addWidget(import_pairings_button)
+
+        # Add to main content layout
+        content_layout.addWidget(import_group)
         
         # Format selection
         format_group = QGroupBox("Export Format")
@@ -449,6 +471,105 @@ class ExportView(QWidget):
                 "Failed to export class data. Please try again.",
                 icon=QMessageBox.Warning
             )
+
+    def import_pairings(self):
+        """Import pairing data from an Excel file."""
+        if not self.class_data:
+            self.main_window.show_message(
+                "No Class Loaded",
+                "Please load a class before importing pairings.",
+                icon=QMessageBox.Warning
+            )
+            return
+        
+        # Get file path
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import Pairings from Excel",
+            "",
+            "Excel Files (*.xlsx *.xls);;CSV Files (*.csv)"
+        )
+        
+        if not file_path:
+            return
+        
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(10)
+        
+        # Give UI time to update
+        QTimer.singleShot(50, lambda: self.perform_pairings_import(file_path))
+
+    def perform_pairings_import(self, file_path):
+        """Perform the actual import of pairing data."""
+        self.progress_bar.setValue(30)
+        
+        try:
+            # Import the pairing data
+            session_data = self.file_handler.import_pairings_from_excel(
+                self.class_data, file_path
+            )
+            
+            if session_data:
+                # Check if this session already exists
+                session_id = session_data.get("id")
+                session_exists = False
+                
+                if "sessions" in self.class_data:
+                    for i, existing_session in enumerate(self.class_data["sessions"]):
+                        if existing_session.get("id") == session_id:
+                            # Update existing session
+                            self.class_data["sessions"][i] = session_data
+                            session_exists = True
+                            break
+                
+                # If it's a new session, add it
+                if not session_exists:
+                    if "sessions" not in self.class_data:
+                        self.class_data["sessions"] = []
+                    self.class_data["sessions"].append(session_data)
+                
+                # Save the updated class data
+                success = self.file_handler.save_class(self.class_data)
+                
+                if success:
+                    msg = "Pairings were updated successfully." if session_exists else "Pairings were imported successfully."
+                    self.main_window.show_message(
+                        "Import Successful",
+                        msg,
+                        icon=QMessageBox.Information
+                    )
+                else:
+                    self.main_window.show_message(
+                        "Save Failed",
+                        "Failed to save the imported pairings. Please try again.",
+                        icon=QMessageBox.Warning
+                    )
+            else:
+                self.main_window.show_message(
+                    "Import Failed",
+                    "Failed to import pairing data. Please check the Excel format and make sure student names match your roster.",
+                    icon=QMessageBox.Warning
+                )
+        except Exception as e:
+            self.main_window.show_message(
+                "Import Error",
+                f"An error occurred during import: {str(e)}",
+                icon=QMessageBox.Critical
+            )
+        
+        self.progress_bar.setValue(100)
+        
+        # Hide progress bar
+        QTimer.singleShot(500, lambda: self.progress_bar.setVisible(False))
+
+    def import_students(self):
+        """Import student data from a CSV or Excel file."""
+        self.main_window.show_message(
+            "Not Implemented",
+            "Student import functionality is not yet implemented.",
+            icon=QMessageBox.Information
+        )
     
     def go_to_students(self):
         """Navigate to the students view."""
