@@ -21,7 +21,7 @@ class PairDisplay(QFrame):
         layout = QVBoxLayout(self)
         
         # Pair number
-        number_label = QLabel(f"Pair {pair_number}")
+        number_label = QLabel(f"Group {pair_number}")
         number_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
         number_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(number_label)

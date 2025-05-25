@@ -3,10 +3,11 @@ from typing import List, Dict, Tuple, Set, Optional
 import itertools
 import uuid
 from datetime import datetime
+from collections import defaultdict
 
 
 class PairingAlgorithm:
-    """Algorithm for generating optimal student pairings."""
+    """Optimized algorithm for generating optimal student pairings."""
     
     def __init__(self, students: List[Dict], previous_sessions: List[Dict] = None):
         """
@@ -23,628 +24,687 @@ class PairingAlgorithm:
         # Create lookup table for faster access
         self.student_lookup = {s["id"]: s for s in students}
         
-        # Extract past pairings
-        self.past_pairings = self._extract_past_pairings()
-        
-        # Track when each pair of students was last paired
-        self.pairing_intervals = self._extract_pairing_intervals()
-        
-        # Track all student pairing history for fairness
-        self.student_interval_history = self._build_student_interval_history()
-        
-    def _extract_past_pairings(self) -> Set[frozenset]:
-        """Extract all past pairings from previous sessions."""
-        past_pairs = set()
-        
-        for session in self.previous_sessions:
-            for pair in session.get("pairs", []):
-                # Store as frozenset for immutable, order-independent comparison
-                student_ids = pair.get("student_ids", [])
-                if len(student_ids) >= 2:  # Store all interactions (pairs and triplets)
-                    # For triplets, store all possible pairs within the triplet
-                    if len(student_ids) == 3:
-                        for i in range(3):
-                            for j in range(i + 1, 3):
-                                past_pairs.add(frozenset([student_ids[i], student_ids[j]]))
-                    else:
-                        past_pairs.add(frozenset(student_ids))
-        
-        return past_pairs
+        # Pre-process all constraints and scores
+        self._preprocess_constraints()
     
-    def _extract_pairing_intervals(self) -> Dict[frozenset, int]:
-        """
-        Extract when each pair of students was last paired.
+    def _preprocess_constraints(self):
+        """Pre-process all pairing constraints and compatibility scores."""
+        # Extract forbidden pairs (recent pairings)
+        self.forbidden_pairs = set()
+        self.recent_pairs = {}  # pair -> how many sessions ago
         
-        Returns:
-            Dictionary mapping student pairs to their most recent session index
-            (0 = most recent session, 1 = second most recent, etc.)
-        """
-        intervals = {}
-        
-        # Loop through sessions from newest to oldest
+        # Process sessions from newest to oldest
         for session_idx, session in enumerate(reversed(self.previous_sessions)):
             for pair in session.get("pairs", []):
                 student_ids = pair.get("student_ids", [])
                 
-                # For each possible pair in this pairing (including pairs within triplets)
+                # Extract all pairs from this group (including within triplets)
                 for i in range(len(student_ids)):
-                    for j in range(i+1, len(student_ids)):
+                    for j in range(i + 1, len(student_ids)):
                         pair_key = frozenset([student_ids[i], student_ids[j]])
                         
                         # Only record the first (most recent) occurrence
-                        if pair_key not in intervals:
-                            intervals[pair_key] = session_idx
+                        if pair_key not in self.recent_pairs:
+                            self.recent_pairs[pair_key] = session_idx
+                            
+                            # Mark as forbidden if too recent
+                            if session_idx == 0:  # Last session
+                                self.forbidden_pairs.add(pair_key)
         
-        return intervals
+        # Pre-calculate all pair compatibility scores
+        self.pair_scores = {}
+        for i, student1_id in enumerate(self.student_ids):
+            for student2_id in self.student_ids[i + 1:]:
+                pair_key = frozenset([student1_id, student2_id])
+                self.pair_scores[pair_key] = self._calculate_pair_score(student1_id, student2_id)
+        
+        # Identify highly constrained students (those with many forbidden pairings)
+        self.student_constraints = defaultdict(int)
+        for pair in self.forbidden_pairs:
+            for student_id in pair:
+                if student_id in self.student_lookup:
+                    self.student_constraints[student_id] += 1
     
-    def _build_student_interval_history(self) -> Dict[str, List[int]]:
+    def _calculate_pair_score(self, student_id1: str, student_id2: str) -> float:
         """
-        Build history of pairing intervals for each student for fairness tracking.
+        Calculate compatibility score for a pair. Lower is better.
         
-        Returns:
-            Dictionary mapping student IDs to lists of their pairing intervals
-        """
-        # Initialize empty history for all students
-        history = {student_id: [] for student_id in self.student_lookup}
-        
-        # Skip if we don't have enough history
-        if len(self.previous_sessions) < 2:
-            return history
-            
-        # Map sessions to their indices for easy lookup
-        session_indices = {session.get("id"): i for i, session in enumerate(self.previous_sessions)}
-        
-        # Track when each student was paired with each other student
-        student_pair_sessions = {}
-        
-        # Go through all sessions
-        for session_idx, session in enumerate(self.previous_sessions):
-            session_id = session.get("id")
-            
-            for pair in session.get("pairs", []):
-                student_ids = pair.get("student_ids", [])
-                
-                # For each pair of students in this pairing
-                for i, student1 in enumerate(student_ids):
-                    for j in range(i+1, len(student_ids)):
-                        student2 = student_ids[j]
-                        
-                        # Create a key for this student pair
-                        pair_key = (student1, student2) if student1 < student2 else (student2, student1)
-                        
-                        # Add this session to their pairing history
-                        if pair_key not in student_pair_sessions:
-                            student_pair_sessions[pair_key] = []
-                        student_pair_sessions[pair_key].append(session_idx)
-        
-        # Calculate intervals for each pair
-        for pair_key, sessions in student_pair_sessions.items():
-            if len(sessions) < 2:
-                continue
-                
-            # Sort sessions chronologically
-            sorted_sessions = sorted(sessions)
-            
-            # Calculate intervals
-            intervals = [sorted_sessions[i] - sorted_sessions[i-1] for i in range(1, len(sorted_sessions))]
-            
-            # Add intervals to both students' histories
-            student1, student2 = pair_key
-            if student1 in history:
-                history[student1].extend(intervals)
-            if student2 in history:
-                history[student2].extend(intervals)
-        
-        return history
-    
-    def get_student_previous_pairs(self, student_id: str) -> Set[str]:
-        """Get all students that a student has been paired with before."""
-        paired_with = set()
-        
-        for pair in self.past_pairings:
-            if student_id in pair:
-                for other_id in pair:
-                    if other_id != student_id:
-                        paired_with.add(other_id)
-        
-        return paired_with
-    
-    def find_optimal_triplet(self) -> List[str]:
-        """
-        Find the optimal group of 3 students.
-        Prioritizes avoiding repeats, then minimizing times in group of three.
-        
-        Returns:
-            List of 3 student IDs for the optimal triplet
-        """
-        if len(self.students) < 3:
-            return []
-            
-        best_triplet = None
-        best_score = float('inf')
-        
-        # Try all possible combinations of 3 students
-        for triplet in itertools.combinations(self.student_ids, 3):
-            # Calculate total score for this triplet
-            total_score = 0
-            
-            # Check all pairs within the triplet
-            for i in range(3):
-                for j in range(i + 1, 3):
-                    pair_key = frozenset([triplet[i], triplet[j]])
-                    
-                    # Check if this would be a short-interval repeat
-                    if pair_key in self.pairing_intervals:
-                        interval = self.pairing_intervals[pair_key]
-                        
-                        # Add very high penalty for short intervals
-                        if interval == 0:  # Last session
-                            total_score += 1000  # Virtually impossible
-                        elif interval == 1:  # Two sessions ago
-                            total_score += 500
-                        elif interval == 2:  # Three sessions ago
-                            total_score += 250
-                        elif interval < 5:
-                            total_score += 100
-                        else:
-                            total_score += 50 * (0.9 ** (interval - 5))
-            
-            # Add penalty for "times in group of 3" imbalance
-            g3_count_sum = sum(self.student_lookup[sid].get("times_in_group_of_three", 0) for sid in triplet)
-            g3_count_std = 0
-            if len(triplet) > 1:
-                g3_values = [self.student_lookup[sid].get("times_in_group_of_three", 0) for sid in triplet]
-                mean = sum(g3_values) / len(g3_values)
-                g3_count_std = (sum((x - mean) ** 2 for x in g3_values) / len(g3_values)) ** 0.5
-            
-            # Add to score (less weight than interval penalties)
-            total_score += g3_count_sum * 2 + g3_count_std * 10
-            
-            if total_score < best_score:
-                best_score = total_score
-                best_triplet = list(triplet)
-        
-        return best_triplet or []
-    
-    def _was_paired_recently(self, student_id1: str, student_id2: str, max_interval: int = 0) -> bool:
-        """
-        Check if two students were paired within the last max_interval sessions.
-        
-        Args:
-            student_id1, student_id2: Student IDs to check
-            max_interval: Maximum interval to consider (0 = last session only)
-            
-        Returns:
-            True if students were paired within the specified interval
-        """
-        pair_key = frozenset([student_id1, student_id2])
-        if pair_key in self.pairing_intervals:
-            return self.pairing_intervals[pair_key] <= max_interval
-        return False
-    
-    def calculate_pair_score(self, student_id1: str, student_id2: str, 
-                           track_preference: str = "none") -> float:
-        """
-        Calculate a score for a potential student pair. Lower score is better.
-        
-        The score is based on:
-        1. How recently they've been paired (higher penalty for more recent pairings)
-        2. Track matching according to preference
-        3. Balance of "times in group of three"
-        4. Fairness of pairing intervals across students
+        This is now only called during preprocessing.
         """
         s1 = self.student_lookup[student_id1]
         s2 = self.student_lookup[student_id2]
         
-        # First, check if this would be a very short interval pairing
-        # Prevent interval-1 repeats completely
-        if self._was_paired_recently(student_id1, student_id2, 0):
-            return float('inf')  # Last session - never pair
-            
-        # Initialize score
+        # Check if this is a forbidden pairing
+        pair_key = frozenset([student_id1, student_id2])
+        if pair_key in self.forbidden_pairs:
+            return float('inf')  # Absolutely forbidden
+        
         score = 0
         
-        # 1. Previous pairing penalty (with time decay)
-        pair_key = frozenset([student_id1, student_id2])
-        if pair_key in self.pairing_intervals:
-            interval = self.pairing_intervals[pair_key]
-            
-            # Use a steeper penalty curve for short intervals
-            if interval == 1:  # Two sessions ago
-                score += 200  # Very high penalty
-            elif interval == 2:  # Three sessions ago
-                score += 100  # High penalty
-            elif interval < 5:  # Recent sessions
-                score += 50  # Moderate penalty
-            else:  # Older sessions
-                score += 20 * (0.9 ** (interval - 5))  # Low penalty
+        # Previous pairing penalty (with time decay)
+        if pair_key in self.recent_pairs:
+            sessions_ago = self.recent_pairs[pair_key]
+            if sessions_ago == 1:  # Two sessions ago
+                score += 100
+            elif sessions_ago == 2:  # Three sessions ago
+                score += 50
+            elif sessions_ago < 5:
+                score += 25
+            else:
+                score += 10 * (0.9 ** (sessions_ago - 5))
         
-        # 2. Track preference score
-        if track_preference == "same":
-            # Prefer same track, penalty for different
-            track_score = 0 if s1["track"] == s2["track"] else 10
-        elif track_preference == "different":
-            # Prefer different track, penalty for same
-            track_score = 0 if s1["track"] != s2["track"] else 10
-        else:  # "none"
-            track_score = 0  # No preference
-            
-        score += track_score
-        
-        # 3. Group of three balance (small penalty)
-        group3_balance = abs(s1.get("times_in_group_of_three", 0) - 
-                             s2.get("times_in_group_of_three", 0))
-        score += group3_balance
-        
-        # 4. Fairness score - encourage pairing students who tend to have shorter intervals
-        # with students who tend to have longer intervals
-        s1_avg_interval = 0
-        s2_avg_interval = 0
-        
-        if student_id1 in self.student_interval_history and self.student_interval_history[student_id1]:
-            s1_avg_interval = sum(self.student_interval_history[student_id1]) / len(self.student_interval_history[student_id1])
-            
-        if student_id2 in self.student_interval_history and self.student_interval_history[student_id2]:
-            s2_avg_interval = sum(self.student_interval_history[student_id2]) / len(self.student_interval_history[student_id2])
-        
-        # If both students have history, slightly prefer pairing students with different avg intervals
-        if s1_avg_interval > 0 and s2_avg_interval > 0:
-            # Add small penalty if both students have similar interval history
-            fairness_score = -abs(s1_avg_interval - s2_avg_interval) * 0.5
-            score += fairness_score
+        # Group of three balance
+        g3_diff = abs(s1.get("times_in_group_of_three", 0) - 
+                     s2.get("times_in_group_of_three", 0))
+        score += g3_diff * 2
         
         return score
     
-    def _verify_no_forbidden_repeats(self, pairings: List[List[str]]) -> bool:
-        """
-        Verify that no interval-1 repeats exist in the generated pairings.
+    def _get_track_bonus(self, student_id1: str, student_id2: str, track_preference: str) -> float:
+        """Calculate track preference bonus. Lower is better."""
+        if track_preference == "none":
+            return 0
         
-        Args:
-            pairings: List of generated pairings (each is a list of student IDs)
-            
-        Returns:
-            True if no interval-1 repeats exist, False otherwise
-        """
-        if not self.previous_sessions:
-            return True  # No previous sessions, so no repeats possible
+        s1 = self.student_lookup[student_id1]
+        s2 = self.student_lookup[student_id2]
+        same_track = s1["track"] == s2["track"]
         
-        # Get all pairs from the last session
-        last_session_pairs = []
-        
-        # Extract all pairs from the last session (including within triplets)
-        last_session = self.previous_sessions[-1]
-        for pair in last_session.get("pairs", []):
-            student_ids = pair.get("student_ids", [])
-            # For each possible pair in this group
-            for i in range(len(student_ids)):
-                for j in range(i+1, len(student_ids)):
-                    last_session_pairs.append(frozenset([student_ids[i], student_ids[j]]))
-        
-        # Check current pairings for repeats
-        for pairing in pairings:
-            # For each possible pair in this pairing
-            for i in range(len(pairing)):
-                for j in range(i+1, len(pairing)):
-                    current_pair = frozenset([pairing[i], pairing[j]])
-                    if current_pair in last_session_pairs:
-                        return False  # Found an interval-1 repeat
-        
-        return True  # No interval-1 repeats found
+        if track_preference == "same":
+            return 0 if same_track else 5
+        else:  # "different"
+            return 0 if not same_track else 5
     
-    def _fix_forbidden_repeats(self, pairings: List[List[str]], track_preference: str) -> List[List[str]]:
+    def _find_best_triplet(self, available_students: List[str]) -> Optional[List[str]]:
         """
-        Attempt to fix interval-1 repeats by swapping students between pairs.
+        Efficiently find the best triplet from available students.
         
-        Args:
-            pairings: List of pairings that contains interval-1 repeats
-            track_preference: Track preference to consider when fixing
-            
-        Returns:
-            Fixed pairings with no interval-1 repeats if possible
+        Uses heuristics instead of brute force.
         """
-        if not self.previous_sessions:
-            return pairings  # No previous sessions, so no repeats possible
+        if len(available_students) < 3:
+            return None
         
-        # Get the last session's pairs
-        last_session = self.previous_sessions[-1]
-        last_session_pairs = []
-        for pair in last_session.get("pairs", []):
-            student_ids = pair.get("student_ids", [])
-            for i in range(len(student_ids)):
-                for j in range(i+1, len(student_ids)):
-                    last_session_pairs.append(frozenset([student_ids[i], student_ids[j]]))
+        # Strategy: Start with the student who has been in groups of 3 the least
+        students_by_g3_count = sorted(
+            available_students,
+            key=lambda sid: self.student_lookup[sid].get("times_in_group_of_three", 0)
+        )
         
-        # Try swapping students between pairs up to 5 times
-        for attempt in range(5):
-            # Track if we made any improvements in this pass
-            improvement_made = False
-            
-            # Check each pair for interval-1 repeats
-            for i, pair1 in enumerate(pairings):
-                if len(pair1) < 2:
-                    continue  # Skip singletons
-                
-                # Find problematic pairs within this group
-                problem_pairs = []
-                for x in range(len(pair1)):
-                    for y in range(x+1, len(pair1)):
-                        if frozenset([pair1[x], pair1[y]]) in last_session_pairs:
-                            problem_pairs.append((x, y))
-                
-                if not problem_pairs:
-                    continue  # No problems in this pair
-                
-                # Find possible swap partners
-                for j, pair2 in enumerate(pairings):
-                    if i == j or len(pair2) < 2:
-                        continue  # Skip same pair and singletons
-                    
-                    # Try swapping to fix the problems
-                    for prob_x, prob_y in problem_pairs:
-                        for swap_idx in range(len(pair2)):
-                            # Try swapping one student from the problem pair
-                            new_pair1 = pair1.copy()
-                            new_pair2 = pair2.copy()
-                            
-                            # Swap students
-                            new_pair1[prob_x], new_pair2[swap_idx] = new_pair2[swap_idx], new_pair1[prob_x]
-                            
-                            # Check if new pairs have improved the situation
-                            old_violations = self._count_interval1_violations([pair1, pair2], last_session_pairs)
-                            new_violations = self._count_interval1_violations([new_pair1, new_pair2], last_session_pairs)
-                            
-                            if new_violations < old_violations:
-                                # Improvement found, apply the swap
-                                pairings[i] = new_pair1
-                                pairings[j] = new_pair2
-                                improvement_made = True
-                                break
-                        
-                        if improvement_made:
-                            break
-                    
-                    if improvement_made:
-                        break
-                
-                if improvement_made:
-                    break
-            
-            # If we've eliminated all violations or can't improve further, stop
-            if self._verify_no_forbidden_repeats(pairings) or not improvement_made:
-                break
-        
-        return pairings
-    
-    def _count_interval1_violations(self, pairs, last_session_pairs):
-        """Count how many interval-1 violations exist in the given pairs."""
-        violations = 0
-        for pair in pairs:
-            for i in range(len(pair)):
-                for j in range(i+1, len(pair)):
-                    if frozenset([pair[i], pair[j]]) in last_session_pairs:
-                        violations += 1
-        return violations
-    
-    def generate_pairings(self, track_preference: str = "same") -> List[List[str]]:
-        """
-        Generate optimal pairings for students using a global optimization approach.
-        
-        Args:
-            track_preference: "same", "different", or "none"
-                
-        Returns:
-            List of student ID lists (each inner list is a pair or triplet)
-        """
-        # Special cases with few students
-        if len(self.students) <= 1:
-            return [[s["id"]] for s in self.students]
-        
-        if len(self.students) == 2:
-            return [[self.students[0]["id"], self.students[1]["id"]]]
-        
-        # Multiple attempts with different randomization
-        best_pairings = None
+        best_triplet = None
         best_score = float('inf')
         
-        for attempt in range(5):  # Try 5 different randomizations
-            # Randomize student order for this attempt
-            student_ids = self.student_ids.copy()
-            random.shuffle(student_ids)
+        # Try triplets starting with students who need groups of 3 most
+        for i in range(min(len(students_by_g3_count), 5)):  # Only check top 5 candidates
+            student1 = students_by_g3_count[i]
             
-            # Generate pairings with this order
-            pairings = self._generate_pairings_internal(student_ids, track_preference)
+            # Find the best two partners for this student
+            remaining = [s for s in available_students if s != student1]
             
-            # Score this solution
-            score = self._score_pairing_solution(pairings, track_preference)
+            # Score all possible pairs for the remaining students
+            pair_candidates = []
+            for j, student2 in enumerate(remaining):
+                for student3 in remaining[j + 1:]:
+                    # Calculate triplet score
+                    pair1_key = frozenset([student1, student2])
+                    pair2_key = frozenset([student1, student3])
+                    pair3_key = frozenset([student2, student3])
+                    
+                    # Check for forbidden pairs
+                    if (pair1_key in self.forbidden_pairs or 
+                        pair2_key in self.forbidden_pairs or 
+                        pair3_key in self.forbidden_pairs):
+                        continue
+                    
+                    # Calculate total score
+                    score = (self.pair_scores.get(pair1_key, 0) + 
+                            self.pair_scores.get(pair2_key, 0) + 
+                            self.pair_scores.get(pair3_key, 0))
+                    
+                    # Add group-of-three balance bonus
+                    g3_counts = [
+                        self.student_lookup[sid].get("times_in_group_of_three", 0)
+                        for sid in [student1, student2, student3]
+                    ]
+                    g3_variance = max(g3_counts) - min(g3_counts)
+                    score += g3_variance * 5
+                    
+                    pair_candidates.append(([student1, student2, student3], score))
             
-            # Update if this is better
-            if score < best_score:
-                best_score = score
-                best_pairings = pairings
-        
-        # Always verify and fix at the end
-        if not self._verify_no_forbidden_repeats(best_pairings):
-            best_pairings = self._fix_forbidden_repeats(best_pairings, track_preference)
-        
-        return best_pairings
-
-    def _generate_pairings_internal(self, student_ids, track_preference):
-        """
-        Internal method to generate pairings for a given order of students.
-        """
-        pairings = []
-        remaining_students = student_ids.copy()
-        
-        # 1. If odd number of students, create a triplet
-        if len(remaining_students) % 2 == 1:
-            triplet = self.find_optimal_triplet()
-            if triplet:
-                pairings.append(triplet)
-                for student_id in triplet:
-                    if student_id in remaining_students:
-                        remaining_students.remove(student_id)
-        
-        # 2. Pair remaining students optimally
-        # Create all possible pairs
-        all_pairs = []
-        for i, student1 in enumerate(remaining_students):
-            for student2 in remaining_students[i+1:]:
-                score = self.calculate_pair_score(student1, student2, track_preference)
-                # Only consider non-infinite scores (avoid absolute constraints)
-                if score < float('inf'):
-                    all_pairs.append((student1, student2, score))
-        
-        # Sort by score (lower is better)
-        all_pairs.sort(key=lambda x: x[2])
-        
-        # Greedy algorithm to select best pairs
-        used_students = set()
-        for s1, s2, score in all_pairs:
-            if s1 not in used_students and s2 not in used_students:
-                pairings.append([s1, s2])
-                used_students.add(s1)
-                used_students.add(s2)
-        
-        # Handle any remaining students
-        remaining = [s for s in remaining_students if s not in used_students]
-        
-        if remaining:
-            # If odd number remaining, create a triplet with the best existing pair
-            if len(remaining) % 2 == 1 and pairings:
-                triplet_candidates = []
+            # Take the best candidate from this starting student
+            if pair_candidates:
+                pair_candidates.sort(key=lambda x: x[1])
+                triplet, score = pair_candidates[0]
                 
-                # Score all possible triplets (existing pair + remaining student)
-                for pair_idx, pair in enumerate(pairings):
-                    if len(pair) == 2:  # Only consider pairs, not existing triplets
-                        for rem_student in remaining:
-                            # Check for interval-1 repeats
-                            has_interval1 = (
-                                self._was_paired_recently(pair[0], rem_student, 0) or
-                                self._was_paired_recently(pair[1], rem_student, 0)
-                            )
-                            
-                            if not has_interval1:
-                                # Calculate score for this triplet
-                                score1 = self.calculate_pair_score(pair[0], rem_student, track_preference)
-                                score2 = self.calculate_pair_score(pair[1], rem_student, track_preference)
+                if score < best_score:
+                    best_score = score
+                    best_triplet = triplet
+        
+        return best_triplet
+    
+    def _build_pairs_incrementally(self, available_students: List[str], 
+                                     track_preference: str) -> List[List[str]]:
+            """
+            Build pairs incrementally using constraint-first approach.
+            Ensures no singletons are created in normal pairing mode.
+            """
+            remaining = available_students.copy()
+            pairs = []
+            
+            # Sort students by constraint level (most constrained first)
+            remaining.sort(key=lambda sid: self.student_constraints.get(sid, 0), reverse=True)
+            
+            while len(remaining) >= 2:
+                # Handle special cases to avoid singletons
+                if len(remaining) == 3:
+                    # Always create a triplet rather than a pair + singleton
+                    pairs.append(remaining)
+                    remaining = []
+                    break
+                
+                # Take the most constrained student
+                student1 = remaining.pop(0)
+                
+                # Find the best valid partner
+                best_partner = None
+                best_score = float('inf')
+                
+                for student2 in remaining:
+                    pair_key = frozenset([student1, student2])
+                    
+                    # Skip forbidden pairs
+                    if pair_key in self.forbidden_pairs:
+                        continue
+                    
+                    # Calculate total score (compatibility + track preference)
+                    score = (self.pair_scores.get(pair_key, 0) + 
+                            self._get_track_bonus(student1, student2, track_preference))
+                    
+                    if score < best_score:
+                        best_score = score
+                        best_partner = student2
+                
+                # Form the pair
+                if best_partner:
+                    remaining.remove(best_partner)
+                    pairs.append([student1, best_partner])
+                else:
+                    # No valid partner found - try relaxed constraints
+                    print(f"No valid partner found for {student1}, trying relaxed constraints...")
+                    
+                    # In relaxed mode, allow forbidden pairs but heavily penalize them
+                    relaxed_best_partner = None
+                    relaxed_best_score = float('inf')
+                    
+                    for student2 in remaining:
+                        pair_key = frozenset([student1, student2])
+                        
+                        # Calculate score even for forbidden pairs
+                        if pair_key in self.forbidden_pairs:
+                            score = 10000  # High penalty but not infinite
+                        else:
+                            score = (self.pair_scores.get(pair_key, 0) + 
+                                    self._get_track_bonus(student1, student2, track_preference))
+                        
+                        if score < relaxed_best_score:
+                            relaxed_best_score = score
+                            relaxed_best_partner = student2
+                    
+                    if relaxed_best_partner:
+                        remaining.remove(relaxed_best_partner)
+                        pairs.append([student1, relaxed_best_partner])
+                        print(f"  Used relaxed constraints to pair {student1}")
+                    else:
+                        # Truly no partner possible - this should be very rare
+                        # Add back to remaining and we'll handle at the end
+                        remaining.append(student1)
+                        break
+            
+            # Handle any remaining students (should be 0 or 1)
+            if remaining:
+                if len(remaining) == 1:
+                    # One student left - add to an existing pair to make a triplet
+                    if pairs:
+                        # Find the best pair to convert to a triplet
+                        best_pair_idx = None
+                        best_score = float('inf')
+                        student_id = remaining[0]
+                        
+                        for i, pair in enumerate(pairs):
+                            if len(pair) == 2:  # Only consider pairs, not existing triplets
+                                # Calculate score for adding student to this pair
+                                total_score = 0
+                                valid = True
                                 
-                                # If either score is infinity, skip this candidate
-                                if score1 == float('inf') or score2 == float('inf'):
-                                    continue
+                                for existing_student in pair:
+                                    pair_key = frozenset([student_id, existing_student])
                                     
-                                total_score = score1 + score2
+                                    if pair_key in self.forbidden_pairs:
+                                        # Allow forbidden pairs in this case but penalize heavily
+                                        total_score += 5000
+                                    else:
+                                        total_score += self.pair_scores.get(pair_key, 0)
                                 
-                                # Track group of 3 balance
-                                g3_score = (
-                                    self.student_lookup[pair[0]].get("times_in_group_of_three", 0) + 
-                                    self.student_lookup[pair[1]].get("times_in_group_of_three", 0) + 
-                                    self.student_lookup[rem_student].get("times_in_group_of_three", 0)
+                                if total_score < best_score:
+                                    best_score = total_score
+                                    best_pair_idx = i
+                        
+                        if best_pair_idx is not None:
+                            pairs[best_pair_idx].append(student_id)
+                            print(f"Added remaining student to pair {best_pair_idx + 1} to form triplet")
+                        else:
+                            # This shouldn't happen, but create a singleton as absolute last resort
+                            pairs.append([student_id])
+                            print(f"WARNING: Created singleton for {student_id} - no valid triplet possible")
+                    else:
+                        # No pairs exist - create singleton (shouldn't happen)
+                        pairs.append(remaining)
+                else:
+                    # Multiple remaining students - try to pair them
+                    while len(remaining) >= 2:
+                        student1 = remaining.pop(0)
+                        student2 = remaining.pop(0)
+                        pairs.append([student1, student2])
+                    
+                    # If one student still remains, handle as above
+                    if remaining:
+                        if pairs:
+                            # Add to best existing pair
+                            best_pair_idx = 0  # Just use first pair for simplicity
+                            pairs[best_pair_idx].append(remaining[0])
+                        else:
+                            pairs.append(remaining)
+            
+            return pairs
+    
+    def _optimize_track_preferences(self, pairs: List[List[str]], 
+                                  track_preference: str) -> List[List[str]]:
+        """
+        Local optimization to improve track preference satisfaction.
+        
+        Try simple swaps that don't violate hard constraints.
+        """
+        if track_preference == "none" or len(pairs) < 2:
+            return pairs
+        
+        improved = True
+        max_iterations = 10
+        iteration = 0
+        
+        while improved and iteration < max_iterations:
+            improved = False
+            iteration += 1
+            
+            # Try swapping students between pairs
+            for i in range(len(pairs)):
+                for j in range(i + 1, len(pairs)):
+                    pair1, pair2 = pairs[i], pairs[j]
+                    
+                    # Only try swaps between pairs (not triplets)
+                    if len(pair1) == 2 and len(pair2) == 2:
+                        # Try all possible swaps
+                        for idx1 in range(2):
+                            for idx2 in range(2):
+                                # Calculate current track satisfaction
+                                current_satisfaction = (
+                                    self._track_satisfaction_score(pair1, track_preference) +
+                                    self._track_satisfaction_score(pair2, track_preference)
                                 )
                                 
-                                triplet_candidates.append((pair_idx, rem_student, total_score, g3_score))
-                
-                # Sort candidates (by score, then by g3 balance)
-                triplet_candidates.sort(key=lambda x: (x[2], x[3]))
-                
-                if triplet_candidates:
-                    pair_idx, student, _, _ = triplet_candidates[0]
-                    # Create triplet by adding student to existing pair
-                    pairings[pair_idx].append(student)
-                    remaining.remove(student)
-            
-            # Create pairs with remaining students
-            if remaining:
-                # Create all possible pairs among remaining students
-                rem_pairs = []
-                for i, s1 in enumerate(remaining):
-                    for j in range(i+1, len(remaining)):
-                        s2 = remaining[j]
-                        # Calculate score, but allow interval-1 repeats if necessary
-                        # (we'll fix them later if possible)
-                        pair_key = frozenset([s1, s2])
-                        interval1_repeat = (
-                            pair_key in self.pairing_intervals and
-                            self.pairing_intervals[pair_key] == 0
-                        )
-                        
-                        if interval1_repeat:
-                            # High penalty but not infinite
-                            score = 1000
-                        else:
-                            score = self.calculate_pair_score(s1, s2, track_preference)
-                            if score == float('inf'):
-                                score = 1000  # Still very high, but not infinite
+                                # Create swapped pairs
+                                new_pair1 = pair1.copy()
+                                new_pair2 = pair2.copy()
+                                new_pair1[idx1], new_pair2[idx2] = new_pair2[idx2], new_pair1[idx1]
                                 
-                        rem_pairs.append((s1, s2, score))
-                
-                # Sort by score
-                rem_pairs.sort(key=lambda x: x[2])
-                
-                # Create pairs
-                rem_used = set()
-                for s1, s2, _ in rem_pairs:
-                    if s1 not in rem_used and s2 not in rem_used:
-                        pairings.append([s1, s2])
-                        rem_used.add(s1)
-                        rem_used.add(s2)
-                
-                # Handle any stragglers (should be none if even number of students)
-                for s in remaining:
-                    if s not in rem_used:
-                        pairings.append([s])
+                                # Check if swap is valid (no forbidden pairs)
+                                if self._is_valid_pair(new_pair1) and self._is_valid_pair(new_pair2):
+                                    # Calculate new track satisfaction
+                                    new_satisfaction = (
+                                        self._track_satisfaction_score(new_pair1, track_preference) +
+                                        self._track_satisfaction_score(new_pair2, track_preference)
+                                    )
+                                    
+                                    # If improvement, make the swap
+                                    if new_satisfaction > current_satisfaction:
+                                        pairs[i] = new_pair1
+                                        pairs[j] = new_pair2
+                                        improved = True
+                                        break
+                            if improved:
+                                break
+                    if improved:
+                        break
+                if improved:
+                    break
         
-        return pairings
-
-    def _score_pairing_solution(self, pairings, track_preference):
-        """
-        Score a complete pairing solution.
-        Lower scores are better.
+        return pairs
+    
+    def _track_satisfaction_score(self, pair: List[str], track_preference: str) -> float:
+        """Calculate how well a pair satisfies track preferences. Higher is better."""
+        if len(pair) != 2 or track_preference == "none":
+            return 0
         
-        Args:
-            pairings: List of pairings (each a list of student IDs)
-            track_preference: "same", "different", or "none"
+        s1 = self.student_lookup[pair[0]]
+        s2 = self.student_lookup[pair[1]]
+        same_track = s1["track"] == s2["track"]
+        
+        if track_preference == "same":
+            return 1 if same_track else 0
+        else:  # "different"
+            return 1 if not same_track else 0
+    
+    def _is_valid_pair(self, pair: List[str]) -> bool:
+        """Check if a pair/group violates hard constraints."""
+        if len(pair) < 2:
+            return True
+        
+        # Check all internal pairs for forbidden combinations
+        for i in range(len(pair)):
+            for j in range(i + 1, len(pair)):
+                pair_key = frozenset([pair[i], pair[j]])
+                if pair_key in self.forbidden_pairs:
+                    return False
+        return True
+    
+    def generate_pairings(self, track_preference: str = "same", use_larger_groups: bool = False) -> List[List[str]]:
+            """
+            Generate optimal pairings using the new efficient algorithm.
             
-        Returns:
-            Total score for the solution
-        """
-        total_score = 0
+            Args:
+                track_preference: "same", "different", or "none"
+                use_larger_groups: If True, prefer groups of 3-4 students instead of pairs
+                    
+            Returns:
+                List of student ID lists (each inner list is a pair or larger group)
+            """
+            # Handle edge cases
+            if len(self.students) <= 1:
+                return [[s["id"]] for s in self.students]
+            
+            if len(self.students) == 2:
+                return [[self.students[0]["id"], self.students[1]["id"]]]
+            
+            # If larger groups are requested, use a different strategy
+            if use_larger_groups:
+                return self._generate_larger_groups(track_preference)
+            
+            # Original strategy for pairs with occasional triplets
+            # If we have an odd number, we'll need one triplet
+            need_triplet = len(self.student_ids) % 2 == 1
+            
+            if need_triplet:
+                # Find the best triplet first
+                best_triplet = self._find_best_triplet(self.student_ids)
+                
+                if best_triplet:
+                    # Remove triplet students and pair the rest
+                    remaining_students = [sid for sid in self.student_ids if sid not in best_triplet]
+                    pairs = self._build_pairs_incrementally(remaining_students, track_preference)
+                    pairs.append(best_triplet)
+                else:
+                    # No good triplet found, build pairs and let the incremental method handle the odd student
+                    print("No optimal triplet found, using incremental pairing to handle odd number")
+                    pairs = self._build_pairs_incrementally(self.student_ids, track_preference)
+            else:
+                # Even number - just build pairs
+                pairs = self._build_pairs_incrementally(self.student_ids, track_preference)
+            
+            # Final safety check - eliminate any singletons that might have been created
+            pairs = self._eliminate_singletons_normal_mode(pairs)
+            
+            # Optimize for track preferences
+            pairs = self._optimize_track_preferences(pairs, track_preference)
+            
+            # Add some randomness by shuffling pairs (but not within pairs)
+            random.shuffle(pairs)
+            
+            return pairs
         
-        # Check for interval-1 repeats (highest priority)
-        if not self._verify_no_forbidden_repeats(pairings):
-            total_score += 1000000  # Very high penalty
-        
-        # Calculate score based on individual pair scores
-        interval_counts = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-        
-        for pair in pairings:
-            if len(pair) >= 2:
-                # Score all possible combinations within this pair/triplet
-                for i in range(len(pair)):
-                    for j in range(i+1, len(pair)):
-                        s1, s2 = pair[i], pair[j]
+    def _generate_larger_groups(self, track_preference: str) -> List[List[str]]:
+            """
+            Generate groups of 3-4 students when larger groups are preferred.
+            Prefers groups of 3, only uses groups of 4 when mathematically necessary.
+            """
+            remaining = self.student_ids.copy()
+            groups = []
+            
+            # Calculate optimal group distribution
+            # We want to minimize groups of 4 while ensuring minimum group size of 3
+            total_students = len(remaining)
+            
+            if total_students % 3 == 0:
+                # Perfect division by 3
+                target_groups_of_3 = total_students // 3
+                target_groups_of_4 = 0
+            elif total_students % 3 == 1:
+                # 1 student left over - convert one group of 3 to group of 4
+                target_groups_of_3 = (total_students - 4) // 3
+                target_groups_of_4 = 1
+            else:  # total_students % 3 == 2
+                # 2 students left over - convert two groups of 3 to two groups of 4
+                if total_students >= 8:  # Need at least 8 students for 2 groups of 4
+                    target_groups_of_3 = (total_students - 8) // 3
+                    target_groups_of_4 = 2
+                else:
+                    # Too few students, just make groups of 3 and handle remainder
+                    target_groups_of_3 = total_students // 3
+                    target_groups_of_4 = 0
+            
+            # Sort students by constraint level and add randomness
+            remaining.sort(key=lambda sid: self.student_constraints.get(sid, 0), reverse=True)
+            random.shuffle(remaining)
+            
+            # First, create the planned groups of 4
+            groups_of_4_created = 0
+            while groups_of_4_created < target_groups_of_4 and len(remaining) >= 4:
+                group_of_4 = self._find_best_larger_group(remaining, 4, track_preference)
+                
+                if group_of_4:
+                    groups.append(group_of_4)
+                    for student_id in group_of_4:
+                        remaining.remove(student_id)
+                    groups_of_4_created += 1
+                else:
+                    # Can't find a valid group of 4, break and handle with groups of 3
+                    break
+            
+            # Then, create groups of 3 with remaining students
+            while len(remaining) >= 3:
+                group_of_3 = self._find_best_larger_group(remaining, 3, track_preference)
+                
+                if group_of_3:
+                    groups.append(group_of_3)
+                    for student_id in group_of_3:
+                        remaining.remove(student_id)
+                else:
+                    # Can't find valid group of 3, try to form any valid smaller group
+                    break
+            
+            # Handle any remaining students
+            while len(remaining) > 0:
+                if len(remaining) == 1:
+                    # Try to add to an existing group (prefer smaller groups first)
+                    added = False
+                    
+                    # Sort groups by size (prefer adding to groups of 3 to make them groups of 4)
+                    sorted_groups = sorted(enumerate(groups), key=lambda x: len(x[1]))
+                    
+                    for group_idx, group in sorted_groups:
+                        if len(group) < 4:  # Don't exceed group size of 4
+                            student_id = remaining[0]
+                            
+                            # Check if we can add this student to this group
+                            can_add = True
+                            for existing_student in group:
+                                pair_key = frozenset([student_id, existing_student])
+                                if pair_key in self.forbidden_pairs:
+                                    can_add = False
+                                    break
+                            
+                            if can_add:
+                                groups[group_idx].append(student_id)
+                                remaining.remove(student_id)
+                                added = True
+                                break
+                    
+                    if not added:
+                        # Can't add to any group, create singleton (shouldn't happen often)
+                        groups.append([remaining.pop(0)])
                         
-                        # Check the interval for this pair
-                        pair_key = frozenset([s1, s2])
-                        if pair_key in self.pairing_intervals:
-                            interval = self.pairing_intervals[pair_key]
-                            if interval < 6:
-                                interval_counts[interval] += 1
+                elif len(remaining) == 2:
+                    # Try to add both to an existing group, or create a pair
+                    added = False
+                    
+                    # Try to add both to a group of 2 to make group of 4
+                    for group_idx, group in enumerate(groups):
+                        if len(group) == 2:
+                            student1, student2 = remaining[0], remaining[1]
+                            
+                            # Check if we can add both students to this group
+                            can_add = True
+                            for student_id in [student1, student2]:
+                                for existing_student in group:
+                                    pair_key = frozenset([student_id, existing_student])
+                                    if pair_key in self.forbidden_pairs:
+                                        can_add = False
+                                        break
+                                if not can_add:
+                                    break
+                            
+                            # Also check if the two remaining students can be paired
+                            if can_add:
+                                pair_key = frozenset([student1, student2])
+                                if pair_key in self.forbidden_pairs:
+                                    can_add = False
+                            
+                            if can_add:
+                                groups[group_idx].extend([student1, student2])
+                                remaining = []
+                                added = True
+                                break
+                    
+                    if not added:
+                        # Try to add one to a group of 3
+                        for group_idx, group in enumerate(groups):
+                            if len(group) == 3:
+                                student_id = remaining[0]
+                                
+                                # Check if we can add this student to this group
+                                can_add = True
+                                for existing_student in group:
+                                    pair_key = frozenset([student_id, existing_student])
+                                    if pair_key in self.forbidden_pairs:
+                                        can_add = False
+                                        break
+                                
+                                if can_add:
+                                    groups[group_idx].append(student_id)
+                                    remaining.remove(student_id)
+                                    added = True
+                                    break
+                    
+                    if not added:
+                        # Just create a pair with the remaining 2 (violates minimum size but better than nothing)
+                        groups.append([remaining[0], remaining[1]])
+                        remaining = []
                         
-                        # Add the pair score
-                        score = self.calculate_pair_score(s1, s2, track_preference)
-                        if score == float('inf'):
-                            total_score += 1000000  # Very high penalty
+                else:  # 3 or more remaining
+                    # Try to create a group of 3
+                    group_of_3 = self._find_best_larger_group(remaining, 3, track_preference)
+                    
+                    if group_of_3:
+                        groups.append(group_of_3)
+                        for student_id in group_of_3:
+                            remaining.remove(student_id)
+                    else:
+                        # Can't create valid group of 3, try pair
+                        pair = self._find_best_pair_from_list(remaining, track_preference)
+                        if pair:
+                            groups.append(pair)
+                            for student_id in pair:
+                                remaining.remove(student_id)
                         else:
-                            total_score += score
+                            # Just take one student as singleton
+                            groups.append([remaining.pop(0)])
+            
+            # Add some randomness by shuffling groups (but not within groups)
+            random.shuffle(groups)
+            
+            return groups
+    
+    def _find_best_larger_group(self, available_students: List[str], group_size: int, 
+                               track_preference: str) -> Optional[List[str]]:
+        """
+        Find the best group of the specified size from available students.
+        """
+        if len(available_students) < group_size:
+            return None
         
-        # Add penalties for short intervals
-        total_score += interval_counts[0] * 1000000  # interval-1 (last session)
-        total_score += interval_counts[1] * 10000    # interval-2 (two sessions ago)
-        total_score += interval_counts[2] * 1000     # interval-3
-        total_score += interval_counts[3] * 100      # interval-4
-        total_score += interval_counts[4] * 10       # interval-5
+        best_group = None
+        best_score = float('inf')
         
-        return total_score
+        # Try up to 20 random combinations to avoid being too slow
+        max_attempts = min(20, len(list(itertools.combinations(available_students, group_size))))
+        
+        # Get some random combinations
+        all_combinations = list(itertools.combinations(available_students, group_size))
+        random.shuffle(all_combinations)
+        
+        for combination in all_combinations[:max_attempts]:
+            # Check if this combination is valid (no forbidden pairs)
+            is_valid = True
+            total_score = 0
+            
+            for i in range(len(combination)):
+                for j in range(i + 1, len(combination)):
+                    pair_key = frozenset([combination[i], combination[j]])
+                    
+                    if pair_key in self.forbidden_pairs:
+                        is_valid = False
+                        break
+                    
+                    # Add compatibility score
+                    total_score += self.pair_scores.get(pair_key, 0)
+                    
+                    # Add track preference bonus
+                    total_score += self._get_track_bonus(combination[i], combination[j], track_preference)
+                
+                if not is_valid:
+                    break
+            
+            if is_valid and total_score < best_score:
+                best_score = total_score
+                best_group = list(combination)
+        
+        return best_group
+    
+    def _find_best_pair_from_list(self, available_students: List[str], 
+                                 track_preference: str) -> Optional[List[str]]:
+        """
+        Find the best pair from a list of available students.
+        """
+        if len(available_students) < 2:
+            return None
+        
+        best_pair = None
+        best_score = float('inf')
+        
+        for i in range(len(available_students)):
+            for j in range(i + 1, len(available_students)):
+                student1, student2 = available_students[i], available_students[j]
+                pair_key = frozenset([student1, student2])
+                
+                # Skip forbidden pairs
+                if pair_key in self.forbidden_pairs:
+                    continue
+                
+                # Calculate score
+                score = (self.pair_scores.get(pair_key, 0) + 
+                        self._get_track_bonus(student1, student2, track_preference))
+                
+                if score < best_score:
+                    best_score = score
+                    best_pair = [student1, student2]
+        
+        return best_pair
     
     def update_group_of_three_counts(self, pairings: List[List[str]]) -> None:
         """Update the times_in_group_of_three counts based on new pairings."""
@@ -655,3 +715,84 @@ class PairingAlgorithm:
                     if student_id in self.student_lookup:
                         student = self.student_lookup[student_id]
                         student["times_in_group_of_three"] = student.get("times_in_group_of_three", 0) + 1
+    
+    # Legacy methods for backward compatibility
+    def get_student_previous_pairs(self, student_id: str) -> Set[str]:
+        """Get all students that a student has been paired with before."""
+        paired_with = set()
+        
+        for pair_key in self.recent_pairs:
+            if student_id in pair_key:
+                for other_id in pair_key:
+                    if other_id != student_id:
+                        paired_with.add(other_id)
+        
+        return paired_with
+    
+    def calculate_pair_score(self, student_id1: str, student_id2: str, 
+                           track_preference: str = "none") -> float:
+        """Legacy method - now uses pre-calculated scores."""
+        pair_key = frozenset([student_id1, student_id2])
+        base_score = self.pair_scores.get(pair_key, 0)
+        track_bonus = self._get_track_bonus(student_id1, student_id2, track_preference)
+        return base_score + track_bonus
+        
+    def update_group_counts(self, pairings: List[List[str]]) -> None:
+            """Alias for backward compatibility."""
+            self.update_group_of_three_counts(pairings)
+            
+    def _eliminate_singletons_normal_mode(self, pairs: List[List[str]]) -> List[List[str]]:
+            """
+            Eliminate singletons in normal pairing mode by converting pairs to triplets.
+            """
+            # Find singletons
+            singletons = [i for i, pair in enumerate(pairs) if len(pair) == 1]
+            
+            if not singletons:
+                return pairs  # No singletons to fix
+            
+            print(f"Eliminating {len(singletons)} singletons in normal mode")
+            
+            # Remove singletons and redistribute their students
+            singleton_students = []
+            for i in sorted(singletons, reverse=True):  # Remove from end to preserve indices
+                singleton_students.append(pairs[i][0])
+                pairs.pop(i)
+            
+            # Add singleton students to existing pairs to make triplets
+            for student_id in singleton_students:
+                # Find the best pair to convert to a triplet
+                best_pair_idx = None
+                best_score = float('inf')
+                
+                for i, pair in enumerate(pairs):
+                    if len(pair) == 2:  # Only consider pairs, not existing triplets
+                        # Calculate score for adding student to this pair
+                        total_score = 0
+                        
+                        for existing_student in pair:
+                            pair_key = frozenset([student_id, existing_student])
+                            
+                            if pair_key in self.forbidden_pairs:
+                                total_score += 5000  # High penalty but allow it
+                            else:
+                                total_score += self.pair_scores.get(pair_key, 0)
+                        
+                        if total_score < best_score:
+                            best_score = total_score
+                            best_pair_idx = i
+                
+                if best_pair_idx is not None:
+                    pairs[best_pair_idx].append(student_id)
+                    print(f"  Converted pair to triplet by adding singleton")
+                else:
+                    # No pairs available - this is unusual but handle it
+                    if pairs:
+                        # Add to the smallest group
+                        smallest_idx = min(range(len(pairs)), key=lambda i: len(pairs[i]))
+                        pairs[smallest_idx].append(student_id)
+                    else:
+                        # No groups at all - create a new singleton (shouldn't happen)
+                        pairs.append([student_id])
+            
+            return pairs

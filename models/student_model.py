@@ -11,6 +11,7 @@ class Student:
     track: str  # FNP, AGNP, Critical Care, etc.
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     times_in_group_of_three: int = 0
+    times_in_group_of_four: int = 0  # New field for tracking groups of 4
     
     def to_dict(self) -> Dict:
         """Convert student object to dictionary for JSON serialization."""
@@ -18,7 +19,8 @@ class Student:
             "id": self.id,
             "name": self.name,
             "track": self.track,
-            "times_in_group_of_three": self.times_in_group_of_three
+            "times_in_group_of_three": self.times_in_group_of_three,
+            "times_in_group_of_four": self.times_in_group_of_four  # Add to dictionary conversion
         }
     
     @classmethod
@@ -28,14 +30,15 @@ class Student:
             id=data.get("id", str(uuid.uuid4())),
             name=data["name"],
             track=data["track"],
-            times_in_group_of_three=data.get("times_in_group_of_three", 0)
+            times_in_group_of_three=data.get("times_in_group_of_three", 0),
+            times_in_group_of_four=data.get("times_in_group_of_four", 0)  # Load from dictionary
         )
 
 
 @dataclass
 class StudentPair:
     """Represents a pairing of students for a session."""
-    student_ids: List[str]  # List of 2 or 3 student IDs
+    student_ids: List[str]  # List of 2, 3, or 4 student IDs
     session_id: str  # Reference to session when pairing was created
     
     def to_dict(self) -> Dict:

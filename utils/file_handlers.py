@@ -143,7 +143,37 @@ class FileHandler:
         except Exception as e:
             print(f"Error deleting class: {e}")
             return False
-    
+            
+    def delete_session(self, class_data: Dict, session_id: str) -> bool:
+        """
+        Delete a session from class data.
+        
+        Args:
+            class_data: Dictionary representation of a class
+            session_id: The ID of the session to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Find and remove the session
+            sessions = class_data.get("sessions", [])
+            original_count = len(sessions)
+            
+            # Remove the session with matching ID
+            class_data["sessions"] = [s for s in sessions if s.get("id") != session_id]
+            
+            # Check if a session was actually removed
+            if len(class_data["sessions"]) == original_count:
+                return False  # No session was found with that ID
+            
+            # Save the updated class data
+            return self.save_class(class_data)
+            
+        except Exception as e:
+            print(f"Error deleting session: {e}")
+            return False    
+            
     def export_students_to_csv(self, class_data: Dict, output_path: str) -> bool:
         """
         Export student roster to CSV format with enhanced data.
@@ -872,13 +902,14 @@ class FileHandler:
             if not session_id:
                 session_id = str(uuid.uuid4())
 
-    original_date = None
-    if session_id:
-        for session in class_data.get("sessions", []):
-            if session.get("id") == session_id:
-                original_date = session.get("date")
-                break
-    
+            # Check for original date if updating an existing session
+            original_date = None
+            if session_id:
+                for session in class_data.get("sessions", []):
+                    if session.get("id") == session_id:
+                        original_date = session.get("date")
+                        break
+            
             # Initialize session data with original date if available
             session_data = {
                 "id": session_id,

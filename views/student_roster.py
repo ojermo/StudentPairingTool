@@ -156,7 +156,8 @@ class StudentRosterView(QWidget):
             self.student_table.setItem(i, 1, track_item)
             
             # Times in group of 3
-            times_item = QTableWidgetItem(str(student.get("times_in_group_of_three", 0)))
+            times_in_g3 = self._calculate_times_in_group_of_three(student_id)
+            times_item = QTableWidgetItem(str(times_in_g3))
             times_item.setTextAlignment(Qt.AlignCenter)  # Center the number
             self.student_table.setItem(i, 2, times_item)
             
@@ -397,6 +398,23 @@ class StudentRosterView(QWidget):
         
         # Show the pairing screen
         self.main_window.show_pairing_screen(self.class_data)
+
+    def _calculate_times_in_group_of_three(self, student_id):
+        """
+        Calculate how many times a student has been in a group of 3 based on actual session history.
+        """
+        if not self.class_data:
+            return 0
+        
+        count = 0
+        sessions = self.class_data.get("sessions", [])
+        for session in sessions:
+            for pair in session.get("pairs", []):
+                student_ids = pair.get("student_ids", [])
+                if len(student_ids) == 3 and student_id in student_ids:
+                    count += 1
+        
+        return count
         
     def go_to_students(self):
         """Navigate to the students view."""

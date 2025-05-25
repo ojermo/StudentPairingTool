@@ -33,11 +33,11 @@ class HistoryView(QWidget):
         """Set up the history view UI."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 10, 10, 10)
-    
+
         # Navigation tabs
         tabs_layout = setup_navigation_bar(self, current_tab="history")
         main_layout.addLayout(tabs_layout)
-    
+
         # Content frame
         content_frame = QFrame()
         content_frame.setObjectName("contentFrame")
@@ -103,6 +103,12 @@ class HistoryView(QWidget):
         actions_layout.addWidget(export_excel_button)
         
         actions_layout.addStretch()
+        
+        # Delete button (NEW)
+        delete_button = QPushButton("Delete Session")
+        delete_button.setObjectName("tertiary")
+        delete_button.clicked.connect(self.delete_session)
+        actions_layout.addWidget(delete_button)
         
         present_button = QPushButton("Present")
         present_button.clicked.connect(self.present_session)
@@ -202,6 +208,11 @@ class HistoryView(QWidget):
             names_item = QTableWidgetItem(", ".join(student_names))
             self.history_table.setItem(i, 1, names_item)
             
+            # Add Group Size column
+            size_item = QTableWidgetItem(str(len(student_ids)))
+            size_item.setTextAlignment(Qt.AlignCenter)
+            self.history_table.setItem(i, 2, size_item)
+            
             # Status (present/absent)
             status_text = "Present" if is_present else "Absent"
             status_item = QTableWidgetItem(status_text)
@@ -213,8 +224,7 @@ class HistoryView(QWidget):
             else:
                 status_item.setForeground(Qt.darkRed)
             
-            self.history_table.setItem(i, 2, status_item)  # Index changed from 3 to 2
-    
+            self.history_table.setItem(i, 3, status_item)    
     def export_session_csv(self):
         """Export the current session to CSV."""
         if not self.current_session:
@@ -391,6 +401,53 @@ class HistoryView(QWidget):
             return
         
         self.main_window.show_presentation_view(self.class_data, self.current_session)
+
+    def delete_session(self):
+        """Delete the selected session after confirmation."""
+        if not self.current_session:
+            self.main_window.show_message(
+                "No Session Selected",
+                "Please select a session to delete.",
+                QMessageBox.Warning
+            )
+            return
+        
+        # Get session date for display
+        session_date = ""
+        try:
+            date_str = self.current_session.get("date", "")
+            date_obj = datetime.fromisoformat(date_str)
+            session_date = date_obj.strftime("%B %d, %Y")
+        except:
+            session_date = "Unknown date"
+        
+        # Show confirmation dialog
+        confirmed = self.main_window.confirm_action(
+            "Confirm Delete",
+            f"Are you sure you want to delete the session from {session_date}?\n\nThis action cannot be undone."
+        )
+        
+        if confirmed:
+            # Delete the session
+            session_id = self.current_session.get("id")
+            success = self.file_handler.delete_session(self.class_data, session_id)
+            
+            if success:
+                self.main_window.show_message(
+                    "Session Deleted",
+                    f"The session from {session_date} was deleted successfully."
+                )
+                
+                # Refresh the session list and clear the table
+                self.current_session = None
+                self.refresh_sessions()
+                self.history_table.setRowCount(0)
+            else:
+                self.main_window.show_message(
+                    "Delete Failed",
+                    "Failed to delete the session. Please try again.",
+                    QMessageBox.Warning
+                )
         
     def go_to_students(self):
         """Navigate to the students view."""
