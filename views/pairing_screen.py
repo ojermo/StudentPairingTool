@@ -148,6 +148,14 @@ class PairingScreen(QWidget):
 
         actions_layout.addStretch()
 
+        self.edit_button = QPushButton("Edit Pairings")
+        self.edit_button.setObjectName("secondary")
+        self.edit_button.clicked.connect(self.toggle_edit_mode)
+        self.edit_button.setEnabled(False)  # Initially disabled
+        actions_layout.addWidget(self.edit_button)
+
+        self.edit_mode = False
+
         self.save_present_button = QPushButton("Save and Present")
         self.save_present_button.setObjectName("secondary")
         self.save_present_button.clicked.connect(self.save_and_present)
@@ -157,6 +165,23 @@ class PairingScreen(QWidget):
         content_layout.addLayout(actions_layout)
         
         main_layout.addWidget(content_frame)
+
+    def toggle_edit_mode(self):
+        """Toggle between view and edit modes."""
+        if not self.current_pairings:
+            return
+        
+        self.edit_mode = not self.edit_mode
+        
+        if self.edit_mode:
+            self.edit_button.setText("View Mode")
+            self.setup_edit_mode_ui()
+        else:
+            self.edit_button.setText("Edit Pairings")
+            # Regenerate the view with current pairings
+            present_pairings = self.current_pairings.get("present", [])
+            absent_pairings = self.current_pairings.get("absent", [])
+            self.display_pairings(present_pairings, absent_pairings)
     
     def load_class(self, class_data):
         """Load a class into the view."""
@@ -389,6 +414,7 @@ class PairingScreen(QWidget):
         if generate_button:
             generate_button.setEnabled(False)
         self.save_present_button.setEnabled(True)
+        self.edit_button.setEnabled(True)
    
     def display_pairings(self, present_pairings, absent_pairings):
             """
@@ -847,6 +873,112 @@ class PairingScreen(QWidget):
         
         # Save the updated counts
         self.file_handler.save_class(self.class_data)
+
+    def setup_edit_mode_ui(self):
+        """Set up the drag-and-drop edit interface."""
+        from views.draggable_widgets import PairGroupWidget
+        
+        # Clear results area
+        self.clear_results()
+        
+        # Create edit mode container
+        edit_container = QWidget()
+        edit_layout = QVBoxLayout(edit_container)
+        
+        # Edit mode header
+        header = QLabel("Edit Pairings - Drag students between groups")
+        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #da532c; padding: 10px;")
+        header.setAlignment(Qt.AlignCenter)
+        edit_layout.addWidget(header)
+        
+        # Create scrollable area for groups
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        
+        groups_container = QWidget()
+        self.groups_layout = QHBoxLayout(groups_container)
+        self.groups_layout.setSpacing(10)
+        
+        # Create group widgets for present students
+        self.group_widgets = []
+        if self.current_pairings and "present" in self.current_pairings:
+            for i, pair_data in enumerate(self.current_pairings["present"]):
+                group_widget = PairGroupWidget(i + 1)
+                group_widget.pairingChanged.connect(self.on_pairing_changed)
+                
+                # Add students to this group
+                for student in pair_data.get("students", []):
+                    group_widget.add_student_card(student)
+                
+                self.group_widgets.append(group_widget)
+                self.groups_layout.addWidget(group_widget)
+        
+        # Add an empty group for creating new pairs
+        empty_group = PairGroupWidget(len(self.group_widgets) + 1)
+        empty_group.pairingChanged.connect(self.on_pairing_changed)
+        self.group_widgets.append(empty_group)
+        self.groups_layout.addWidget(empty_group)
+        
+        scroll_area.setWidget(groups_container)
+        edit_layout.addWidget(scroll_area)
+        
+        # Update pairing warnings
+        self.update_all_group_warnings()
+        
+        self.results_layout.addWidget(edit_container)
+
+    def on_pairing_changed(self):
+        """Called when students are moved between groups."""
+        # Update the current_pairings data structure
+        self.update_pairings_from_groups()
+        
+        # Update warnings for all groups
+        self.update_all_group_warnings()
+
+    def update_pairings_from_groups(self):
+        """Update self.current_pairings based on the current group state."""
+        if not self.current_pairings:
+            return
+        
+        new_present_pairings = []
+        
+        for i, group_widget in enumerate(self.group_widgets):
+            student_ids = group_widget.get_student_ids()
+            
+            if len(student_ids) > 0:  # Only include non-empty groups
+                # Get student data
+                students = []
+                for student_id in student_ids:
+                    # Find student data in class data
+                    if student_id in self.class_data["students"]:
+                        students.append(self.class_data["students"][student_id])
+                
+                pair_data = {
+                    "pair_number": i + 1,
+                    "student_ids": student_ids,
+                    "students": students,
+                    "present": True
+                }
+                new_present_pairings.append(pair_data)
+        
+        # Update the current pairings
+        self.current_pairings["present"] = new_present_pairings
+
+    def update_all_group_warnings(self):
+        """Update previous pairing warnings for all groups."""
+        for group_widget in self.group_widgets:
+            student_ids = group_widget.get_student_ids()
+            
+            if len(student_ids) >= 2:
+                display_text, _ = self._check_previous_pairings(student_ids)
+                if "No previous" not in display_text:
+                    # Show warning
+                    warning = "⚠️ Previous pairing"
+                    group_widget.update_header(warning)
+                else:
+                    group_widget.update_header()
+            else:
+                group_widget.update_header()
         
     def go_to_students(self):
         """Navigate to the students view."""
