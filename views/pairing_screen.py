@@ -12,6 +12,7 @@ from utils.ui_helpers import setup_navigation_bar
 from datetime import datetime
 import random
 from models.pairing_model import PairingAlgorithm
+from views.draggable_widgets import StudentChip, DroppableTableRow
 
 class PairCard(QFrame):
     """Widget representing a student pair or group."""
@@ -49,6 +50,7 @@ class PairingScreen(QWidget):
         self.class_data = None
         self.current_pairings = None
         self.current_session = None
+        self.original_pairings = None  # Store original pairings for "undo"
         
         self.setup_ui()
     
@@ -146,15 +148,14 @@ class PairingScreen(QWidget):
         self.regenerate_button.setEnabled(False)  # Initially disabled
         actions_layout.addWidget(self.regenerate_button)
 
+        # Add undo button (replaces edit mode functionality)
+        self.undo_button = QPushButton("Undo Changes")
+        self.undo_button.setObjectName("tertiary")
+        self.undo_button.clicked.connect(self.undo_changes)
+        self.undo_button.setEnabled(False)  # Initially disabled
+        actions_layout.addWidget(self.undo_button)
+
         actions_layout.addStretch()
-
-        self.edit_button = QPushButton("Edit Pairings")
-        self.edit_button.setObjectName("secondary")
-        self.edit_button.clicked.connect(self.toggle_edit_mode)
-        self.edit_button.setEnabled(False)  # Initially disabled
-        actions_layout.addWidget(self.edit_button)
-
-        self.edit_mode = False
 
         self.save_present_button = QPushButton("Save and Present")
         self.save_present_button.setObjectName("secondary")
@@ -166,32 +167,17 @@ class PairingScreen(QWidget):
         
         main_layout.addWidget(content_frame)
 
-    def toggle_edit_mode(self):
-        """Toggle between view and edit modes."""
-        if not self.current_pairings:
-            return
-        
-        self.edit_mode = not self.edit_mode
-        
-        if self.edit_mode:
-            self.edit_button.setText("View Mode")
-            self.setup_edit_mode_ui()
-        else:
-            self.edit_button.setText("Edit Pairings")
-            # Regenerate the view with current pairings
-            present_pairings = self.current_pairings.get("present", [])
-            absent_pairings = self.current_pairings.get("absent", [])
-            self.display_pairings(present_pairings, absent_pairings)
-    
     def load_class(self, class_data):
         """Load a class into the view."""
         self.class_data = class_data
         self.current_pairings = None
         self.current_session = None
+        self.original_pairings = None
         
         # Reset button states
-        self.save_present_button.setEnabled(False)  # Changed from self.save_button
+        self.save_present_button.setEnabled(False)
         self.regenerate_button.setEnabled(False)
+        self.undo_button.setEnabled(False)
         
         # Find and reenable the Generate Pairings button
         generate_button = self.findChild(QPushButton, "generate_button")
@@ -290,6 +276,20 @@ class PairingScreen(QWidget):
                 QMessageBox.Warning
             )
 
+    def undo_changes(self):
+        """Restore the original pairings, undoing any manual changes."""
+        if self.original_pairings:
+            # Restore the original pairings
+            self.current_pairings = self.original_pairings.copy()
+            
+            # Redisplay the pairings
+            present_pairings = self.current_pairings.get("present", [])
+            absent_pairings = self.current_pairings.get("absent", [])
+            self.display_pairings(present_pairings, absent_pairings)
+            
+            # Disable undo button since we're back to original state
+            self.undo_button.setEnabled(False)
+
     def generate_pairings(self):
         """Generate student pairings."""
         if not self.class_data:
@@ -341,26 +341,6 @@ class PairingScreen(QWidget):
             # Generate optimal pairings with our enhanced algorithm
             present_pairs = present_algorithm.generate_pairings(track_preference, use_larger_groups)
             
-#            # Update group size counts for record-keeping
-#            present_algorithm.update_group_counts(present_pairs)
-#            
-#            # Update student data in the class data with new group counts
-#            for student in present_students:
-#                if student["id"] in present_algorithm.student_lookup:
-#                    updated_student = present_algorithm.student_lookup[student["id"]]
-#                    # Update times in group of three
-#                    if "times_in_group_of_three" in updated_student:
-#                        self.class_data["students"][student["id"]]["times_in_group_of_three"] = \
-#                            updated_student["times_in_group_of_three"]
-#                    # Update times in group of four
-#                    if "times_in_group_of_four" in updated_student:
-#                        # Ensure the field exists first
-#                        if "times_in_group_of_four" not in self.class_data["students"][student["id"]]:
-#                            self.class_data["students"][student["id"]]["times_in_group_of_four"] = 0
-#                        # Update the value
-#                        self.class_data["students"][student["id"]]["times_in_group_of_four"] = \
-#                            updated_student.get("times_in_group_of_four", 0)
-            
             # Create pairing data with student details for display
             for i, pair in enumerate(present_pairs):
                 students = []
@@ -405,6 +385,10 @@ class PairingScreen(QWidget):
             "use_larger_groups": use_larger_groups  # Store the larger groups preference
         }
         
+        # Store original pairings for undo functionality
+        import copy
+        self.original_pairings = copy.deepcopy(self.current_pairings)
+        
         # Display the pairings
         self.display_pairings(present_pairings, absent_pairings)
         
@@ -414,265 +398,313 @@ class PairingScreen(QWidget):
         if generate_button:
             generate_button.setEnabled(False)
         self.save_present_button.setEnabled(True)
-        self.edit_button.setEnabled(True)
+        self.undo_button.setEnabled(False)  # No changes made yet
    
     def display_pairings(self, present_pairings, absent_pairings):
-            """
-            Display the generated pairings in a table format with previous pairing detection.
+        """
+        Display the generated pairings in a table format with draggable chips.
+        
+        Args:
+            present_pairings: List of pairing data for present students
+            absent_pairings: List of pairing data for absent students
+        """
+        # Clear previous results
+        self.clear_results()
+        
+        # Create a splitter to hold both tables
+        splitter = QSplitter(Qt.Vertical)
+        splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        # Create container widgets for each section
+        present_container = QWidget()
+        present_layout = QVBoxLayout(present_container)
+        present_layout.setContentsMargins(0, 0, 0, 0)
+        
+        absent_container = QWidget()
+        absent_layout = QVBoxLayout(absent_container)
+        absent_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Present students section
+        if present_pairings:
+            present_header = QLabel("Present Students")
+            present_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
+            present_layout.addWidget(present_header)
             
-            Args:
-                present_pairings: List of pairing data for present students
-                absent_pairings: List of pairing data for absent students
-            """
-            # Clear previous results
-            self.clear_results()
+            # Create table
+            present_table = QTableWidget()
+            present_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            present_table.setColumnCount(4)
+            present_table.setHorizontalHeaderLabels(["Pair", "Students", "Previous Pairing", "Status"])
+            present_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            present_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+            present_table.setColumnWidth(2, 200)
+            present_table.setRowCount(len(present_pairings))
             
-            # Create a splitter to hold both tables
-            splitter = QSplitter(Qt.Vertical)
-            splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            # Set minimum row height to accommodate chips
+            present_table.verticalHeader().setDefaultSectionSize(35)
             
-            # Create container widgets for each section
-            present_container = QWidget()
-            present_layout = QVBoxLayout(present_container)
-            present_layout.setContentsMargins(0, 0, 0, 0)
+            # Store reference to present table for drag/drop operations
+            self.present_table = present_table
+            self.present_droppable_rows = []
             
-            absent_container = QWidget()
-            absent_layout = QVBoxLayout(absent_container)
-            absent_layout.setContentsMargins(0, 0, 0, 0)
+            # Add pairs to table
+            for i, pair in enumerate(present_pairings):
+                # Pair number
+                pair_item = QTableWidgetItem(str(i + 1))
+                pair_item.setTextAlignment(Qt.AlignCenter)
+                present_table.setItem(i, 0, pair_item)
+                
+                # Students column - create droppable row with chips
+                droppable_row = DroppableTableRow(i, present_table)
+                droppable_row.studentMoved.connect(self.on_student_moved)
+                
+                # Add student chips to the row
+                for student in pair.get("students", []):
+                    droppable_row.add_student_chip(student)
+                
+                present_table.setCellWidget(i, 1, droppable_row)
+                self.present_droppable_rows.append(droppable_row)
+                
+                # Previous pairing check
+                display_text, tooltip_text = self._check_previous_pairings(pair.get("student_ids", []))
+                previous_item = QTableWidgetItem(display_text)
+                previous_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)
+                previous_item.setToolTip(tooltip_text)
+                
+                if "No previous" in display_text:
+                    previous_item.setForeground(Qt.darkGreen)
+                else:
+                    previous_item.setForeground(Qt.darkRed)
+                
+                present_table.setItem(i, 2, previous_item)
+                
+                # Status
+                status_item = QTableWidgetItem("Present")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                status_item.setForeground(Qt.darkGreen)
+                present_table.setItem(i, 3, status_item)
             
-            # Present students section
+            present_layout.addWidget(present_table)
+        else:
+            # No present students message
+            no_present = QLabel("No present students to pair")
+            no_present.setAlignment(Qt.AlignCenter)
+            no_present.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
+            present_layout.addWidget(no_present)
+        
+        # Absent students section (simplified - no drag/drop needed for absent students)
+        if absent_pairings:
+            absent_header = QLabel("Absent Students")
+            absent_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #666666;")
+            absent_layout.addWidget(absent_header)
+            
+            # Create table
+            absent_table = QTableWidget()
+            absent_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            absent_table.setColumnCount(4)
+            absent_table.setHorizontalHeaderLabels(["Pair", "Students", "Previous Pairing", "Status"])
+            absent_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            absent_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
+            absent_table.setColumnWidth(2, 200)
+            absent_table.setRowCount(len(absent_pairings))
+            
+            # Add pairs to table
+            for i, pair in enumerate(absent_pairings):
+                # Pair number
+                pair_item = QTableWidgetItem(str(i + 1))
+                pair_item.setTextAlignment(Qt.AlignCenter)
+                absent_table.setItem(i, 0, pair_item)
+                
+                # Student names (text only for absent students)
+                student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
+                names_item = QTableWidgetItem(", ".join(student_names))
+                absent_table.setItem(i, 1, names_item)
+                
+                # Previous pairing check
+                display_text, tooltip_text = self._check_previous_pairings(pair.get("student_ids", []))
+                previous_item = QTableWidgetItem(display_text)
+                previous_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)
+                previous_item.setToolTip(tooltip_text)
+                
+                if "No previous" in display_text:
+                    previous_item.setForeground(Qt.darkGreen)
+                else:
+                    previous_item.setForeground(Qt.darkRed)
+                
+                absent_table.setItem(i, 2, previous_item)
+                
+                # Status
+                status_item = QTableWidgetItem("Absent")
+                status_item.setTextAlignment(Qt.AlignCenter)
+                status_item.setForeground(Qt.darkRed)
+                absent_table.setItem(i, 3, status_item)
+            
+            absent_layout.addWidget(absent_table)
+        else:
+            # No absent students message
             if present_pairings:
-                present_header = QLabel("Present Students")
-                present_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #da532c;")
-                present_layout.addWidget(present_header)
+                no_absent = QLabel("No absent students")
+                no_absent.setAlignment(Qt.AlignCenter)
+                no_absent.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
+                absent_layout.addWidget(no_absent)
+        
+        # Add containers to splitter
+        splitter.addWidget(present_container)
+        splitter.addWidget(absent_container)
+        
+        # Set initial sizes - 70% for present, 30% for absent
+        if present_pairings and absent_pairings:
+            splitter.setSizes([70, 30])
+        
+        # Add splitter to the main layout
+        self.results_layout.addWidget(splitter)
+
+    def on_student_moved(self, student_id, new_row_index):
+        """Handle when a student is moved between pairs."""
+        # Update the current_pairings data structure
+        self.update_pairings_from_table()
+        
+        # Update the previous pairing warnings
+        self.update_previous_pairing_warnings()
+        
+        # Enable undo button since changes were made
+        self.undo_button.setEnabled(True)
+
+    def update_pairings_from_table(self):
+        """Update self.current_pairings based on the current table state."""
+        if not self.current_pairings or not hasattr(self, 'present_droppable_rows'):
+            return
+        
+        new_present_pairings = []
+        
+        for i, droppable_row in enumerate(self.present_droppable_rows):
+            student_ids = droppable_row.get_student_ids()
+            
+            if len(student_ids) > 0:  # Only include non-empty pairs
+                # Get student data
+                students = []
+                for student_id in student_ids:
+                    # Find student data in class data
+                    if student_id in self.class_data["students"]:
+                        students.append(self.class_data["students"][student_id])
                 
-                # Create table
-                present_table = QTableWidget()
-                present_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-                present_table.setColumnCount(4)
-                present_table.setHorizontalHeaderLabels(["Pair", "Students", "Previous Pairing", "Status"])
-                present_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-                present_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Fixed)
-                present_table.setColumnWidth(2, 200)  # Increased width for more detail
-                present_table.setRowCount(len(present_pairings))
-                
-                # Enable word wrap and automatic row sizing
-                present_table.setWordWrap(True)
-                present_table.setTextElideMode(Qt.ElideNone)
-                present_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-                
-                # Add pairs to table
-                for i, pair in enumerate(present_pairings):
-                    # Don't set fixed row height - let it resize automatically
-                    
-                    # Pair number
-                    pair_item = QTableWidgetItem(str(i + 1))
-                    pair_item.setTextAlignment(Qt.AlignCenter)
-                    present_table.setItem(i, 0, pair_item)
-                    
-                    # Student names
-                    student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
-                    names_item = QTableWidgetItem(", ".join(student_names))
-                    present_table.setItem(i, 1, names_item)
-                    
-                    # Previous pairing check
-                    display_text, tooltip_text = self._check_previous_pairings(pair.get("student_ids", []))
-                    previous_item = QTableWidgetItem(display_text)
-                    previous_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)
-                    previous_item.setToolTip(tooltip_text)
-                    
-                    if "No previous" in display_text:
-                        previous_item.setForeground(Qt.darkGreen)
-                    else:
-                        previous_item.setForeground(Qt.darkRed)
-                    
-                    present_table.setItem(i, 2, previous_item)
-                    
-                    # Status
-                    status_item = QTableWidgetItem("Present")
-                    status_item.setTextAlignment(Qt.AlignCenter)
-                    status_item.setForeground(Qt.darkGreen)
-                    present_table.setItem(i, 3, status_item)
-                
-                # Resize rows to fit content after all items are added
-                present_table.resizeRowsToContents()
-                
-                present_layout.addWidget(present_table)
+                pair_data = {
+                    "pair_number": i + 1,
+                    "student_ids": student_ids,
+                    "students": students,
+                    "present": True
+                }
+                new_present_pairings.append(pair_data)
+        
+        # Update the current pairings
+        self.current_pairings["present"] = new_present_pairings
+
+    def update_previous_pairing_warnings(self):
+        """Update the previous pairing warnings in the table."""
+        if not hasattr(self, 'present_table') or not hasattr(self, 'present_droppable_rows'):
+            return
+        
+        for i, droppable_row in enumerate(self.present_droppable_rows):
+            student_ids = droppable_row.get_student_ids()
+            
+            # Update the previous pairing column
+            display_text, tooltip_text = self._check_previous_pairings(student_ids)
+            previous_item = QTableWidgetItem(display_text)
+            previous_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)
+            previous_item.setToolTip(tooltip_text)
+            
+            if "No previous" in display_text:
+                previous_item.setForeground(Qt.darkGreen)
             else:
-                # No present students message
-                no_present = QLabel("No present students to pair")
-                no_present.setAlignment(Qt.AlignCenter)
-                no_present.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
-                present_layout.addWidget(no_present)
+                previous_item.setForeground(Qt.darkRed)
             
-            # Absent students section
-            if absent_pairings:
-                absent_header = QLabel("Absent Students")
-                absent_header.setStyleSheet("font-size: 18px; font-weight: bold; color: #666666;")
-                absent_layout.addWidget(absent_header)
-                
-                # Create table
-                absent_table = QTableWidget()
-                absent_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-                absent_table.setColumnCount(5)
-                absent_table.setHorizontalHeaderLabels(["Pair", "Students", "Tracks", "Previous Pairing", "Status"])
-                absent_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-                absent_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-                absent_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
-                absent_table.setColumnWidth(3, 200)  # Increased width for more detail
-                absent_table.setRowCount(len(absent_pairings))
-                
-                # Enable word wrap and automatic row sizing
-                absent_table.setWordWrap(True)
-                absent_table.setTextElideMode(Qt.ElideNone)
-                absent_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-                
-                # Add pairs to table
-                for i, pair in enumerate(absent_pairings):
-                    # Don't set fixed row height - let it resize automatically
-                    
-                    # Pair number
-                    pair_item = QTableWidgetItem(str(i + 1))
-                    pair_item.setTextAlignment(Qt.AlignCenter)
-                    absent_table.setItem(i, 0, pair_item)
-                    
-                    # Student names
-                    student_names = [s.get("name", "Unknown") for s in pair.get("students", [])]
-                    names_item = QTableWidgetItem(", ".join(student_names))
-                    absent_table.setItem(i, 1, names_item)
-                    
-                    # Tracks
-                    student_tracks = [s.get("track", "") for s in pair.get("students", [])]
-                    tracks_item = QTableWidgetItem(", ".join(student_tracks))
-                    absent_table.setItem(i, 2, tracks_item)
-                    
-                    # Previous pairing check
-                    display_text, tooltip_text = self._check_previous_pairings(pair.get("student_ids", []))
-                    previous_item = QTableWidgetItem(display_text)
-                    previous_item.setTextAlignment(Qt.AlignTop | Qt.AlignLeft)
-                    previous_item.setToolTip(tooltip_text)
-                    
-                    if "No previous" in display_text:
-                        previous_item.setForeground(Qt.darkGreen)
-                    else:
-                        previous_item.setForeground(Qt.darkRed)
-                    
-                    absent_table.setItem(i, 3, previous_item)
-                    
-                    # Status
-                    status_item = QTableWidgetItem("Absent")
-                    status_item.setTextAlignment(Qt.AlignCenter)
-                    status_item.setForeground(Qt.darkRed)
-                    absent_table.setItem(i, 4, status_item)
-                
-                # Resize rows to fit content after all items are added
-                absent_table.resizeRowsToContents()
-                
-                absent_layout.addWidget(absent_table)
-            else:
-                # No absent students message
-                if present_pairings:
-                    no_absent = QLabel("No absent students")
-                    no_absent.setAlignment(Qt.AlignCenter)
-                    no_absent.setStyleSheet("color: #666666; font-size: 14px; padding: 10px;")
-                    absent_layout.addWidget(no_absent)
-            
-            # Add containers to splitter
-            splitter.addWidget(present_container)
-            splitter.addWidget(absent_container)
-            
-            # Set initial sizes - 70% for present, 30% for absent
-            if present_pairings and absent_pairings:
-                splitter.setSizes([70, 30])
-            
-            # Add splitter to the main layout
-            self.results_layout.addWidget(splitter)
+            self.present_table.setItem(i, 2, previous_item)
     
     def _check_previous_pairings(self, student_ids):
-            """
-            Check if any students in the group have been paired together before.
+        """
+        Check if any students in the group have been paired together before.
+        
+        Args:
+            student_ids: List of student IDs in the current group
             
-            Args:
-                student_ids: List of student IDs in the current group
+        Returns:
+            Tuple of (display_text, tooltip_text) for previous pairing status
+        """
+        if len(student_ids) < 2:
+            return ("N/A", "Not applicable for single students")
+        
+        # We need access to the pairing algorithm's previous pairing data
+        if not hasattr(self, 'last_algorithm') or not self.last_algorithm:
+            return ("Unknown", "Cannot access pairing history")
+        
+        algorithm = self.last_algorithm
+        previous_pairs_info = []
+        
+        # Check all possible internal pairs within this group
+        for i in range(len(student_ids)):
+            for j in range(i + 1, len(student_ids)):
+                pair_key = frozenset([student_ids[i], student_ids[j]])
                 
-            Returns:
-                Tuple of (display_text, tooltip_text) for previous pairing status
-            """
-            if len(student_ids) < 2:
-                return ("N/A", "Not applicable for single students")
-            
-            # We need access to the pairing algorithm's previous pairing data
-            if not hasattr(self, 'last_algorithm') or not self.last_algorithm:
-                return ("Unknown", "Cannot access pairing history")
-            
-            algorithm = self.last_algorithm
-            previous_pairs_info = []
-            
-            # Check all possible internal pairs within this group
-            for i in range(len(student_ids)):
-                for j in range(i + 1, len(student_ids)):
-                    pair_key = frozenset([student_ids[i], student_ids[j]])
+                # Check if this pair exists in recent_pairs (from any previous session)
+                if hasattr(algorithm, 'recent_pairs') and pair_key in algorithm.recent_pairs:
+                    sessions_ago = algorithm.recent_pairs[pair_key]
                     
-                    # Check if this pair exists in recent_pairs (from any previous session)
-                    if hasattr(algorithm, 'recent_pairs') and pair_key in algorithm.recent_pairs:
-                        sessions_ago = algorithm.recent_pairs[pair_key]
-                        
-                        # Get student names for display
-                        student1_name = "Unknown"
-                        student2_name = "Unknown"
-                        
-                        if student_ids[i] in algorithm.student_lookup:
-                            student1_name = algorithm.student_lookup[student_ids[i]].get("name", "Unknown")
-                        if student_ids[j] in algorithm.student_lookup:
-                            student2_name = algorithm.student_lookup[student_ids[j]].get("name", "Unknown")
-                        
-                        # Create timing description
-                        if sessions_ago == 0:
-                            timing = "last session"
-                        elif sessions_ago == 1:
-                            timing = "2 sessions ago"
-                        else:
-                            timing = f"{sessions_ago + 1} sessions ago"
-                        
-                        previous_pairs_info.append({
-                            'names': f"{student1_name} & {student2_name}",
-                            'timing': timing,
-                            'sessions_ago': sessions_ago
-                        })
-            
-            if not previous_pairs_info:
-                return ("No previous pairings", "No students in this group have worked together before")
-            
-            # Sort by recency (most recent first)
-            previous_pairs_info.sort(key=lambda x: x['sessions_ago'])
-            
-            # Create display text and detailed tooltip
-            if len(previous_pairs_info) == 1:
-                pair_info = previous_pairs_info[0]
-                display_text = f"{pair_info['names']}\n({pair_info['timing']})"
-                tooltip_text = f"{pair_info['names']} worked together {pair_info['timing']}"
-            else:
-                # Multiple pairs - show each pair explicitly in the display text
-                display_lines = []
-                tooltip_lines = ["Previous pairings found:"]
-                
-                # Show up to 3 pairs in the display, rest in tooltip
-                display_limit = 3
-                
-                for i, pair_info in enumerate(previous_pairs_info):
-                    pair_line = f"{pair_info['names']} ({pair_info['timing']})"
-                    tooltip_lines.append(f"• {pair_line}")
+                    # Get student names for display
+                    student1_name = "Unknown"
+                    student2_name = "Unknown"
                     
-                    if i < display_limit:
-                        display_lines.append(pair_line)
-                
-                if len(previous_pairs_info) > display_limit:
-                    display_lines.append(f"...and {len(previous_pairs_info) - display_limit} more")
-                
-                display_text = "\n".join(display_lines)
-                tooltip_text = "\n".join(tooltip_lines)
+                    if student_ids[i] in algorithm.student_lookup:
+                        student1_name = algorithm.student_lookup[student_ids[i]].get("name", "Unknown")
+                    if student_ids[j] in algorithm.student_lookup:
+                        student2_name = algorithm.student_lookup[student_ids[j]].get("name", "Unknown")
+                    
+                    # Create timing description
+                    if sessions_ago == 0:
+                        timing = "last session"
+                    elif sessions_ago == 1:
+                        timing = "2 sessions ago"
+                    else:
+                        timing = f"{sessions_ago + 1} sessions ago"
+                    
+                    previous_pairs_info.append({
+                        'names': f"{student1_name} & {student2_name}",
+                        'timing': timing,
+                        'sessions_ago': sessions_ago
+                    })
+        
+        if not previous_pairs_info:
+            return ("No previous pairings", "No students in this group have worked together before")
+        
+        # Sort by recency (most recent first)
+        previous_pairs_info.sort(key=lambda x: x['sessions_ago'])
+        
+        # Create display text and detailed tooltip
+        if len(previous_pairs_info) == 1:
+            pair_info = previous_pairs_info[0]
+            display_text = f"{pair_info['names']}\n({pair_info['timing']})"
+            tooltip_text = f"{pair_info['names']} worked together {pair_info['timing']}"
+        else:
+            # Multiple pairs - show each pair explicitly in the display text
+            display_lines = []
+            tooltip_lines = ["Previous pairings found:"]
             
-            return (display_text, tooltip_text) 
+            # Show up to 3 pairs in the display, rest in tooltip
+            display_limit = 3
+            
+            for i, pair_info in enumerate(previous_pairs_info):
+                pair_line = f"{pair_info['names']} ({pair_info['timing']})"
+                tooltip_lines.append(f"• {pair_line}")
+                
+                if i < display_limit:
+                    display_lines.append(pair_line)
+            
+            if len(previous_pairs_info) > display_limit:
+                display_lines.append(f"...and {len(previous_pairs_info) - display_limit} more")
+            
+            display_text = "\n".join(display_lines)
+            tooltip_text = "\n".join(tooltip_lines)
+        
+        return (display_text, tooltip_text) 
         
     def save_pairings(self):
         """Save the current pairings to history."""
@@ -873,112 +905,6 @@ class PairingScreen(QWidget):
         
         # Save the updated counts
         self.file_handler.save_class(self.class_data)
-
-    def setup_edit_mode_ui(self):
-        """Set up the drag-and-drop edit interface."""
-        from views.draggable_widgets import PairGroupWidget
-        
-        # Clear results area
-        self.clear_results()
-        
-        # Create edit mode container
-        edit_container = QWidget()
-        edit_layout = QVBoxLayout(edit_container)
-        
-        # Edit mode header
-        header = QLabel("Edit Pairings - Drag students between groups")
-        header.setStyleSheet("font-size: 16px; font-weight: bold; color: #da532c; padding: 10px;")
-        header.setAlignment(Qt.AlignCenter)
-        edit_layout.addWidget(header)
-        
-        # Create scrollable area for groups
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        
-        groups_container = QWidget()
-        self.groups_layout = QHBoxLayout(groups_container)
-        self.groups_layout.setSpacing(10)
-        
-        # Create group widgets for present students
-        self.group_widgets = []
-        if self.current_pairings and "present" in self.current_pairings:
-            for i, pair_data in enumerate(self.current_pairings["present"]):
-                group_widget = PairGroupWidget(i + 1)
-                group_widget.pairingChanged.connect(self.on_pairing_changed)
-                
-                # Add students to this group
-                for student in pair_data.get("students", []):
-                    group_widget.add_student_card(student)
-                
-                self.group_widgets.append(group_widget)
-                self.groups_layout.addWidget(group_widget)
-        
-        # Add an empty group for creating new pairs
-        empty_group = PairGroupWidget(len(self.group_widgets) + 1)
-        empty_group.pairingChanged.connect(self.on_pairing_changed)
-        self.group_widgets.append(empty_group)
-        self.groups_layout.addWidget(empty_group)
-        
-        scroll_area.setWidget(groups_container)
-        edit_layout.addWidget(scroll_area)
-        
-        # Update pairing warnings
-        self.update_all_group_warnings()
-        
-        self.results_layout.addWidget(edit_container)
-
-    def on_pairing_changed(self):
-        """Called when students are moved between groups."""
-        # Update the current_pairings data structure
-        self.update_pairings_from_groups()
-        
-        # Update warnings for all groups
-        self.update_all_group_warnings()
-
-    def update_pairings_from_groups(self):
-        """Update self.current_pairings based on the current group state."""
-        if not self.current_pairings:
-            return
-        
-        new_present_pairings = []
-        
-        for i, group_widget in enumerate(self.group_widgets):
-            student_ids = group_widget.get_student_ids()
-            
-            if len(student_ids) > 0:  # Only include non-empty groups
-                # Get student data
-                students = []
-                for student_id in student_ids:
-                    # Find student data in class data
-                    if student_id in self.class_data["students"]:
-                        students.append(self.class_data["students"][student_id])
-                
-                pair_data = {
-                    "pair_number": i + 1,
-                    "student_ids": student_ids,
-                    "students": students,
-                    "present": True
-                }
-                new_present_pairings.append(pair_data)
-        
-        # Update the current pairings
-        self.current_pairings["present"] = new_present_pairings
-
-    def update_all_group_warnings(self):
-        """Update previous pairing warnings for all groups."""
-        for group_widget in self.group_widgets:
-            student_ids = group_widget.get_student_ids()
-            
-            if len(student_ids) >= 2:
-                display_text, _ = self._check_previous_pairings(student_ids)
-                if "No previous" not in display_text:
-                    # Show warning
-                    warning = "⚠️ Previous pairing"
-                    group_widget.update_header(warning)
-                else:
-                    group_widget.update_header()
-            else:
-                group_widget.update_header()
         
     def go_to_students(self):
         """Navigate to the students view."""
